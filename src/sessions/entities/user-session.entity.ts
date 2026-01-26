@@ -26,12 +26,12 @@ export class UserSession extends BaseEntity {
   @JoinColumn({ name: 'userId' })
   user: User;
 
-  @Column()
-  tenantId: number;
+  @Column({ nullable: true })
+  tenantId: number | null;
 
-  @ManyToOne(() => Tenant)
+  @ManyToOne(() => Tenant, { nullable: true })
   @JoinColumn({ name: 'tenantId' })
-  tenant: Tenant;
+  tenant: Tenant | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   deviceId?: string | null;

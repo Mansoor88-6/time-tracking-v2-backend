@@ -5,9 +5,12 @@ import { hashPassword } from '../../common/utils/password.util';
 export async function seedSuperAdmin(dataSource: DataSource): Promise<void> {
   const superAdminRepository = dataSource.getRepository(SuperAdmin);
 
+  const email = process.env.SUPER_ADMIN_EMAIL || 'admin@averox.com';
+  const password = process.env.SUPER_ADMIN_PASSWORD || 'Admin@123';
+
   // Check if SuperAdmin already exists
   const existingSuperAdmin = await superAdminRepository.findOne({
-    where: { email: 'admin@averox.com' },
+    where: { email },
   });
 
   if (existingSuperAdmin) {
@@ -16,15 +19,15 @@ export async function seedSuperAdmin(dataSource: DataSource): Promise<void> {
   }
 
   // Create default SuperAdmin
-  const hashedPassword = await hashPassword('Admin@123');
+  const hashedPassword = await hashPassword(password);
   const superAdmin = superAdminRepository.create({
     name: 'Super Admin',
-    email: 'admin@averox.com',
+    email,
     password: hashedPassword,
   });
 
   await superAdminRepository.save(superAdmin);
   console.log('SuperAdmin seeded successfully!');
-  console.log('Email: admin@averox.com');
-  console.log('Password: Admin@123');
+  console.log(`Email: ${email}`);
+  console.log(`Password: ${password}`);
 }

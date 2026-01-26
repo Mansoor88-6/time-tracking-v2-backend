@@ -9,7 +9,7 @@ import * as bcrypt from 'bcrypt';
 
 export interface CreateSessionOptions {
   userId: number;
-  tenantId: number;
+  tenantId?: number | null;
   refreshToken: string;
   expiresAt: Date;
   deviceId?: string;

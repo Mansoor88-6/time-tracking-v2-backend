@@ -136,13 +136,13 @@ export class AuthService {
     const refreshExpiresAt = new Date();
     refreshExpiresAt.setDate(refreshExpiresAt.getDate() + 7);
 
-    await this.sessionsService.createSession({
-      userId: superAdmin.id,
-      tenantId: 0,
-      refreshToken,
-      expiresAt: refreshExpiresAt,
-      clientType: SessionClientType.WEB,
-    });
+    // await this.sessionsService.createSession({
+    //   userId: superAdmin.id,
+    //   tenantId: null,
+    //   refreshToken,
+    //   expiresAt: refreshExpiresAt,
+    //   clientType: SessionClientType.WEB,
+    // });
 
     return {
       accessToken,

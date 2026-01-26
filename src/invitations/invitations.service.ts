@@ -12,6 +12,7 @@ import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { UsersService } from '../users/users.service';
 import { Roles } from '../common/enums/roles.enum';
 import { TeamMember } from '../teams/entities/team-member.entity';
+import { Team } from '../teams/entities/team.entity';
 
 @Injectable()
 export class InvitationsService {
@@ -20,6 +21,8 @@ export class InvitationsService {
     private readonly invitationsRepository: Repository<Invitation>,
     @InjectRepository(TeamMember)
     private readonly teamMembersRepository: Repository<TeamMember>,
+    @InjectRepository(Team)
+    private readonly teamsRepository: Repository<Team>,
     private readonly usersService: UsersService,
   ) {}
 
@@ -98,6 +101,17 @@ export class InvitationsService {
     // Assign teams if provided
     if (Array.isArray(invitation.teamIds) && invitation.teamIds.length > 0) {
       for (const teamId of invitation.teamIds) {
+        // Validate that the team exists and belongs to the same tenant
+        const team = await this.teamsRepository.findOne({
+          where: { id: teamId, tenantId: invitation.tenantId },
+        });
+        if (!team) {
+          // Skip invalid teams instead of failing the entire invitation
+          // In production, you might want to log this or notify the admin
+          continue;
+        }
+
+        // Check if membership already exists
         const existing = await this.teamMembersRepository.findOne({
           where: { teamId, userId: user.id },
         });
