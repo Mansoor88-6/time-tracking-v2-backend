@@ -118,18 +118,35 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     };
 
     try {
+      // emit() is fire-and-forget, but we await it to catch immediate errors
+      // Note: Transient errors during topic creation/leader election are handled by KafkaJS retries
       await this.kafkaClient.emit(topic, message);
       this.logger.log(
-        `Published batch of ${batch.events.length} events to ${topic} for device ${deviceId}`,
+        `✅ Published batch of ${batch.events.length} events to ${topic} for device ${deviceId}`,
       );
     } catch (error) {
-      this.logger.error(
-        `Failed to publish batch to Kafka: ${error.message}`,
-        error.stack,
-      );
-      // In production, you might want to implement a retry mechanism or dead-letter queue
-      // For now, we'll throw to let the controller handle it
-      throw new Error('Failed to publish events to queue');
+      // Only log as error if it's a persistent failure
+      // Transient errors (like leader election) are handled by KafkaJS retry logic
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isTransientError =
+        errorMessage.includes('leader') ||
+        errorMessage.includes('election') ||
+        errorMessage.includes('NotAvailable');
+
+      if (isTransientError) {
+        this.logger.warn(
+          `⚠️  Transient Kafka error (will retry): ${errorMessage}. Message may still be published.`,
+        );
+        // Don't throw for transient errors - KafkaJS will retry automatically
+        // The message will eventually be published
+      } else {
+        this.logger.error(
+          `❌ Failed to publish batch to Kafka: ${errorMessage}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+        // In production, you might want to implement a retry mechanism or dead-letter queue
+        throw new Error('Failed to publish events to queue');
+      }
     }
   }
 

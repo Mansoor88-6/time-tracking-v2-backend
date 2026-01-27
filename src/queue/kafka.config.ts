@@ -1,11 +1,13 @@
-import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import { Transport } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
+import { KafkaOptions } from '@nestjs/microservices/interfaces/microservice-configuration.interface';
 
 export const getKafkaConfig = (
   configService: ConfigService,
-): MicroserviceOptions => {
-  const broker = configService.get<string>('kafka.broker');
-  const clientId = configService.get<string>('kafka.clientId');
+): KafkaOptions => {
+  const broker = configService.get<string>('kafka.broker') || 'localhost:9092';
+  const clientId = configService.get<string>('kafka.clientId') || 'time-tracking-api';
+  const groupId = configService.get<string>('kafka.groupId') || 'events-producer';
 
   return {
     transport: Transport.KAFKA,
@@ -20,7 +22,7 @@ export const getKafkaConfig = (
         },
       },
       consumer: {
-        groupId: configService.get<string>('kafka.groupId'),
+        groupId,
         allowAutoTopicCreation: true,
       },
       producer: {

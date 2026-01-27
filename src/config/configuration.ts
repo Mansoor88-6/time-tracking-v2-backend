@@ -12,7 +12,7 @@ export default () => ({
     expiresIn: process.env.JWT_EXPIRES_IN || '24h',
   },
   kafka: {
-    broker: process.env.KAFKA_BROKER || 'localhost:9092',
+    broker: process.env.KAFKA_BROKER || '51.91.156.207:9092',
     clientId: process.env.KAFKA_CLIENT_ID || 'time-tracking-api',
     groupId: process.env.KAFKA_GROUP_ID || 'events-producer',
     topicRawEvents: process.env.KAFKA_TOPIC_RAW_EVENTS || 'raw-events',
