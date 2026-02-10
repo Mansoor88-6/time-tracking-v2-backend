@@ -71,5 +71,13 @@ export class DevicesService {
     device.isAuthorized = false;
     await this.devicesRepository.save(device);
   }
+
+  async listTenantDevices(tenantId: number): Promise<Device[]> {
+    return this.devicesRepository.find({
+      where: { tenantId },
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+    });
+  }
 }
 

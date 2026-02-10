@@ -13,6 +13,7 @@ import {
 import { TeamsService } from './teams.service';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
+import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../auth/guards/tenant.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -66,6 +67,46 @@ export class TeamsController {
   @UseGuards(RolesGuard)
   remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
     return this.teamsService.remove(req.user.tenantId, id);
+  }
+
+  @Get(':id/members')
+  @RolesDecorator(Roles.ORG_ADMIN, Roles.TEAM_MANAGER)
+  @UseGuards(RolesGuard)
+  getTeamMembers(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ) {
+    return this.teamsService.getTeamMembers(req.user.tenantId, id);
+  }
+
+  @Post(':id/members')
+  @RolesDecorator(Roles.ORG_ADMIN, Roles.TEAM_MANAGER)
+  @UseGuards(RolesGuard)
+  addTeamMember(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddTeamMemberDto,
+    @Request() req,
+  ) {
+    return this.teamsService.addTeamMember(
+      req.user.tenantId,
+      id,
+      dto.userId,
+    );
+  }
+
+  @Delete(':id/members/:userId')
+  @RolesDecorator(Roles.ORG_ADMIN, Roles.TEAM_MANAGER)
+  @UseGuards(RolesGuard)
+  removeTeamMember(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('userId', ParseIntPipe) userId: number,
+    @Request() req,
+  ) {
+    return this.teamsService.removeTeamMember(
+      req.user.tenantId,
+      id,
+      userId,
+    );
   }
 }
 

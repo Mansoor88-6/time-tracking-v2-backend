@@ -49,6 +49,13 @@ export class DevicesController {
     return this.devicesService.listUserDevices(req.user.id, req.user.tenantId);
   }
 
+  @Get('organization')
+  @RolesDecorator(Roles.ORG_ADMIN, Roles.SUPER_ADMIN)
+  @UseGuards(RolesGuard)
+  async getOrganizationDevices(@Request() req: AuthenticatedRequest) {
+    return this.devicesService.listTenantDevices(req.user.tenantId);
+  }
+
   @Patch(':id/revoke')
   @RolesDecorator(Roles.ORG_ADMIN, Roles.SUPER_ADMIN, Roles.EMPLOYEE)
   @UseGuards(RolesGuard)

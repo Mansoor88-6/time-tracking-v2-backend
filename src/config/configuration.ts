@@ -17,4 +17,14 @@ export default () => ({
     groupId: process.env.KAFKA_GROUP_ID || 'events-producer',
     topicRawEvents: process.env.KAFKA_TOPIC_RAW_EVENTS || 'raw-events',
   },
+  worker: {
+    serviceUrl:
+      process.env.WORKER_SERVICE_URL || 'http://localhost:3300',
+    internalKey:
+      process.env.WORKER_INTERNAL_KEY || 'change-me-in-production',
+    requestTimeoutMs: parseInt(
+      process.env.WORKER_REQUEST_TIMEOUT_MS || '5000',
+      10,
+    ),
+  },
 });

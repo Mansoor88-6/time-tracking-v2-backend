@@ -6,6 +6,7 @@ import { TeamMember } from './entities/team-member.entity';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
 import { Roles } from '../common/enums/roles.enum';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class TeamsService {
@@ -14,6 +15,8 @@ export class TeamsService {
     private readonly teamsRepository: Repository<Team>,
     @InjectRepository(TeamMember)
     private readonly teamMembersRepository: Repository<TeamMember>,
+    @InjectRepository(User)
+    private readonly usersRepository: Repository<User>,
   ) {}
 
   async create(
@@ -82,6 +85,64 @@ export class TeamsService {
     const team = await this.findOne(tenantId, id);
     await this.teamMembersRepository.delete({ teamId: team.id });
     await this.teamsRepository.delete(team.id);
+  }
+
+  async getTeamMembers(tenantId: number, teamId: number): Promise<TeamMember[]> {
+    const team = await this.findOne(tenantId, teamId);
+    return this.teamMembersRepository.find({
+      where: { teamId: team.id },
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async addTeamMember(
+    tenantId: number,
+    teamId: number,
+    userId: number,
+  ): Promise<TeamMember> {
+    const team = await this.findOne(tenantId, teamId);
+
+    // Verify user belongs to the same tenant
+    const user = await this.usersRepository.findOne({
+      where: { id: userId, tenantId },
+    });
+    if (!user) {
+      throw new NotFoundException(
+        `User with ID ${userId} not found in this organization`,
+      );
+    }
+
+    // Check if membership already exists
+    const existing = await this.teamMembersRepository.findOne({
+      where: { teamId: team.id, userId },
+    });
+    if (existing) {
+      throw new ForbiddenException('User is already a member of this team');
+    }
+
+    const membership = this.teamMembersRepository.create({
+      teamId: team.id,
+      userId,
+    });
+    return this.teamMembersRepository.save(membership);
+  }
+
+  async removeTeamMember(
+    tenantId: number,
+    teamId: number,
+    userId: number,
+  ): Promise<void> {
+    const team = await this.findOne(tenantId, teamId);
+
+    const membership = await this.teamMembersRepository.findOne({
+      where: { teamId: team.id, userId },
+    });
+    if (!membership) {
+      throw new NotFoundException('User is not a member of this team');
+    }
+
+    await this.teamMembersRepository.remove(membership);
   }
 }
 

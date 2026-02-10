@@ -14,6 +14,7 @@ import { InvitationsModule } from './invitations/invitations.module';
 import { PasswordResetModule } from './password-reset/password-reset.module';
 import { DevicesModule } from './devices/devices.module';
 import { EventsModule } from './events/events.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import configuration from './config/configuration';
@@ -49,6 +50,7 @@ import configuration from './config/configuration';
     PasswordResetModule,
     DevicesModule,
     EventsModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [

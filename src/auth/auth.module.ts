@@ -6,19 +6,21 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { DeviceJwtStrategy } from './strategies/device-jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { TokenBlacklistService } from './services/token-blacklist.service';
 import { UsersModule } from '../users/users.module';
 import { SuperAdminModule } from '../super-admin/super-admin.module';
 import { User } from '../users/entities/user.entity';
 import { SuperAdmin } from '../super-admin/entities/super-admin.entity';
+import { Device } from '../devices/entities/device.entity';
 import { SessionsModule } from '../sessions/sessions.module';
 import { PasswordResetModule } from '../password-reset/password-reset.module';
 
 @Module({
   imports: [
     PassportModule,
-    TypeOrmModule.forFeature([User, SuperAdmin]),
+    TypeOrmModule.forFeature([User, SuperAdmin, Device]),
     forwardRef(() => UsersModule),
     forwardRef(() => SuperAdminModule),
     SessionsModule,
@@ -40,7 +42,7 @@ import { PasswordResetModule } from '../password-reset/password-reset.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, LocalStrategy, TokenBlacklistService],
+  providers: [AuthService, JwtStrategy, DeviceJwtStrategy, LocalStrategy, TokenBlacklistService],
   exports: [AuthService, TokenBlacklistService],
 })
 export class AuthModule {}
