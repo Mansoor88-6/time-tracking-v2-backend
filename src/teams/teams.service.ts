@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Team } from './entities/team.entity';
@@ -7,6 +7,7 @@ import { CreateTeamDto } from './dto/create-team.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
 import { Roles } from '../common/enums/roles.enum';
 import { User } from '../users/entities/user.entity';
+import { RuleCollectionsService } from '../rule-collections/rule-collections.service';
 
 @Injectable()
 export class TeamsService {
@@ -17,6 +18,8 @@ export class TeamsService {
     private readonly teamMembersRepository: Repository<TeamMember>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @Inject(forwardRef(() => RuleCollectionsService))
+    private readonly ruleCollectionsService: RuleCollectionsService,
   ) {}
 
   async create(
@@ -143,6 +146,36 @@ export class TeamsService {
     }
 
     await this.teamMembersRepository.remove(membership);
+  }
+
+  async getUserTeams(tenantId: number, userId: number): Promise<Team[]> {
+    // Verify user belongs to tenant
+    const user = await this.usersRepository.findOne({
+      where: { id: userId, tenantId },
+    });
+    if (!user) {
+      throw new NotFoundException(
+        `User with ID ${userId} not found in this organization`,
+      );
+    }
+
+    // Get all team memberships for this user
+    const memberships = await this.teamMembersRepository.find({
+      where: { userId },
+      relations: ['team'],
+    });
+
+    // Filter teams that belong to the tenant
+    const teams = memberships
+      .map((membership) => membership.team)
+      .filter((team) => team.tenantId === tenantId);
+
+    return teams;
+  }
+
+  async getTeamCollections(tenantId: number, teamId: number) {
+    await this.findOne(tenantId, teamId);
+    return this.ruleCollectionsService.getTeamCollections(tenantId, teamId);
   }
 }
 

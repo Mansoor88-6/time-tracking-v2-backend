@@ -53,6 +53,8 @@ export class DashboardService {
    * @param userId - User ID from authenticated user
    * @param date - Date string in YYYY-MM-DD format (optional, defaults to today)
    * @param timezone - IANA timezone (optional)
+   * @param startDate - Start date string in YYYY-MM-DD format (for date range)
+   * @param endDate - End date string in YYYY-MM-DD format (for date range)
    * @returns Dashboard statistics from worker service
    */
   async getDashboardStats(
@@ -60,14 +62,16 @@ export class DashboardService {
     userId: number,
     date?: string,
     timezone?: string,
+    startDate?: string,
+    endDate?: string,
   ): Promise<any> {
     const startTime = Date.now();
 
-    // Default to today's date if not provided
-    const targetDate = date || this.getTodayDateString();
+    // Default to today's date if not provided (only if no date range)
+    const targetDate = date || (startDate && endDate ? undefined : this.getTodayDateString());
 
     this.logger.log(
-      `📊 Dashboard stats request: tenant=${tenantId}, user=${userId}, date=${targetDate}, tz=${timezone || 'UTC'}`,
+      `📊 Dashboard stats request: tenant=${tenantId}, user=${userId}, date=${targetDate || 'N/A'}, startDate=${startDate || 'N/A'}, endDate=${endDate || 'N/A'}, tz=${timezone || 'UTC'}`,
     );
 
     try {
@@ -75,9 +79,17 @@ export class DashboardService {
       const queryParams = new URLSearchParams({
         tenantId: tenantId.toString(),
         userId: userId.toString(),
-        date: targetDate,
       });
 
+      if (targetDate) {
+        queryParams.append('date', targetDate);
+      }
+      if (startDate) {
+        queryParams.append('startDate', startDate);
+      }
+      if (endDate) {
+        queryParams.append('endDate', endDate);
+      }
       if (timezone) {
         queryParams.append('tz', timezone);
       }
@@ -378,16 +390,13 @@ export class DashboardService {
       const userStatsPromises = allUsers.map(async (user) => {
         try {
           // Use date range if provided, otherwise use single date
-          const targetDate =
-            query.startDate && query.endDate
-              ? query.startDate // For date range, we'll need to handle this differently
-              : query.date || this.getTodayDateString();
-
           const stats = await this.getDashboardStats(
             tenantId,
             user.id,
-            targetDate,
+            query.date,
             query.tz,
+            query.startDate,
+            query.endDate,
           );
 
           return {

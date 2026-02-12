@@ -108,5 +108,15 @@ export class TeamsController {
       userId,
     );
   }
+
+  @Get(':id/collections')
+  @RolesDecorator(Roles.ORG_ADMIN, Roles.TEAM_MANAGER, Roles.VIEWER)
+  @UseGuards(RolesGuard)
+  getTeamCollections(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ) {
+    return this.teamsService.getTeamCollections(req.user.tenantId, id);
+  }
 }
 

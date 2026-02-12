@@ -46,6 +46,8 @@ export class DashboardController {
         userId,
         query.date,
         query.tz,
+        query.startDate,
+        query.endDate,
       );
 
       const duration = Date.now() - startTime;
