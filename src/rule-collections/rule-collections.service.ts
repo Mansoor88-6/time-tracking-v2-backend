@@ -401,6 +401,28 @@ export class RuleCollectionsService {
   }
 
   /**
+   * Get all rules for a collection
+   */
+  async getCollectionRules(
+    tenantId: number,
+    collectionId: number,
+  ): Promise<TeamProductivityRule[]> {
+    // Verify collection exists and belongs to tenant
+    const collection = await this.findOne(tenantId, collectionId);
+
+    // Get all rules for this collection
+    return this.rulesRepository.find({
+      where: {
+        collectionId: collection.id,
+      },
+      order: {
+        appType: 'ASC',
+        appName: 'ASC',
+      },
+    });
+  }
+
+  /**
    * Get collections assigned to a team
    */
   async getTeamCollections(

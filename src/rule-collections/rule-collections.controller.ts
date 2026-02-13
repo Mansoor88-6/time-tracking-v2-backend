@@ -64,6 +64,13 @@ export class RuleCollectionsController {
     );
   }
 
+  @Get(':id/rules')
+  @RolesDecorator(Roles.ORG_ADMIN)
+  @UseGuards(RolesGuard)
+  getCollectionRules(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.ruleCollectionsService.getCollectionRules(req.user.tenantId, id);
+  }
+
   @Get(':id')
   @RolesDecorator(Roles.ORG_ADMIN)
   @UseGuards(RolesGuard)
