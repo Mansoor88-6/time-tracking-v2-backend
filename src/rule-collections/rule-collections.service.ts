@@ -5,8 +5,8 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { RuleCollection } from './entities/rule-collection.entity';
 import { RuleCollectionTeam } from './entities/rule-collection-team.entity';
 import { TeamProductivityRule, AppType, AppCategory, RuleType } from '../productivity-rules/entities/team-productivity-rule.entity';
@@ -31,6 +31,8 @@ export class RuleCollectionsService {
     private readonly collectionTeamsRepository: Repository<RuleCollectionTeam>,
     @InjectRepository(TeamProductivityRule)
     private readonly rulesRepository: Repository<TeamProductivityRule>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
     @Inject(forwardRef(() => TeamsService))
     private readonly teamsService: TeamsService,
   ) {}
@@ -238,10 +240,78 @@ export class RuleCollectionsService {
   ): Promise<RuleCollection> {
     const collection = await this.findOne(tenantId, id);
 
-    if (dto.name) collection.name = dto.name;
-    if (dto.description !== undefined) collection.description = dto.description;
+    if (dto.teamIds !== undefined) {
+      for (const teamId of dto.teamIds) {
+        await this.teamsService.findOne(tenantId, teamId);
+      }
+    }
 
-    return this.collectionsRepository.save(collection);
+    await this.dataSource.transaction(async (manager) => {
+      if (dto.name !== undefined) collection.name = dto.name;
+      if (dto.description !== undefined) collection.description = dto.description;
+      await manager.save(RuleCollection, collection);
+
+      if (dto.teamIds !== undefined) {
+        await manager.delete(RuleCollectionTeam, { collectionId: id });
+        const teamAssignments = dto.teamIds.map((teamId) =>
+          manager.create(RuleCollectionTeam, {
+            collectionId: id,
+            teamId,
+          }),
+        );
+        if (teamAssignments.length > 0) {
+          await manager.save(RuleCollectionTeam, teamAssignments);
+        }
+      }
+
+      if (dto.rules !== undefined) {
+        await manager.delete(TeamProductivityRule, { collectionId: id });
+
+        const teamAssignments = await manager.find(RuleCollectionTeam, {
+          where: { collectionId: id },
+        });
+        const teamIds = teamAssignments.map((ta) => ta.teamId);
+
+        if (teamIds.length > 0 && dto.rules.length > 0) {
+          const rulesToInsert: TeamProductivityRule[] = [];
+          for (const teamId of teamIds) {
+            for (const rule of dto.rules) {
+              const normalizedAppName = rule.appName.toLowerCase().trim();
+              const ruleType = rule.ruleType ?? this.determineRuleType(rule.appName, rule.appType, rule.pattern);
+              const pattern = rule.pattern ?? undefined;
+              const isDomainRule = ruleType === RuleType.DOMAIN;
+
+              if (pattern && (ruleType === RuleType.URL_EXACT || ruleType === RuleType.URL_PATTERN)) {
+                this.validateURLPattern(pattern);
+              }
+
+              let finalAppName = normalizedAppName;
+              if (ruleType === RuleType.DOMAIN && this.isURL(normalizedAppName)) {
+                finalAppName = this.extractDomainFromURL(normalizedAppName);
+              }
+
+              rulesToInsert.push(
+                manager.create(TeamProductivityRule, {
+                  teamId,
+                  collectionId: id,
+                  appName: finalAppName,
+                  appType: rule.appType,
+                  category: rule.category,
+                  ruleType,
+                  pattern: pattern ?? undefined,
+                  isDomainRule,
+                }),
+              );
+            }
+          }
+          if (rulesToInsert.length > 0) {
+            await manager.save(TeamProductivityRule, rulesToInsert);
+          }
+        }
+      }
+    });
+
+    return this.findOne(tenantId, id);
   }
 
   async deleteCollection(tenantId: number, id: number): Promise<void> {

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Team } from './entities/team.entity';
 import { TeamMember } from './entities/team-member.entity';
 import { CreateTeamDto } from './dto/create-team.dto';
@@ -171,6 +171,34 @@ export class TeamsService {
       .filter((team) => team.tenantId === tenantId);
 
     return teams;
+  }
+
+  /**
+   * Returns teams per user for the given user IDs in one query (for admin user list).
+   */
+  async getTeamsByUserIds(
+    tenantId: number,
+    userIds: number[],
+  ): Promise<Map<number, { id: number; name: string }[]>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    const memberships = await this.teamMembersRepository.find({
+      where: {
+        userId: In(userIds),
+        team: { tenantId },
+      },
+      relations: ['team'],
+    });
+
+    const map = new Map<number, { id: number; name: string }[]>();
+    for (const m of memberships) {
+      const entry = map.get(m.userId) ?? [];
+      entry.push({ id: m.team.id, name: m.team.name });
+      map.set(m.userId, entry);
+    }
+    return map;
   }
 
   async getTeamCollections(tenantId: number, teamId: number) {

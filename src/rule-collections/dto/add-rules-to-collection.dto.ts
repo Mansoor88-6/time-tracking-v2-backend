@@ -2,7 +2,7 @@ import { IsArray, IsNotEmpty, ValidateNested, IsOptional, IsString, IsEnum, Matc
 import { Type } from 'class-transformer';
 import { AppType, AppCategory, RuleType } from '../../productivity-rules/entities/team-productivity-rule.entity';
 
-class RuleDto {
+export class RuleDto {
   @IsNotEmpty()
   appName: string;
 

@@ -212,20 +212,29 @@ export class DashboardService {
     userId: number,
     date?: string,
     timezone?: string,
+    startDate?: string,
+    endDate?: string,
   ): Promise<any> {
     const startTime = Date.now();
+    const useRange = !!startDate && !!endDate;
     const targetDate = date || this.getTodayDateString();
 
     this.logger.log(
-      `📱 App usage request: tenant=${tenantId}, user=${userId}, date=${targetDate}, tz=${timezone || 'UTC'}`,
+      `📱 App usage request: tenant=${tenantId}, user=${userId}, ${useRange ? `range=${startDate}-${endDate}` : `date=${targetDate}`}, tz=${timezone || 'UTC'}`,
     );
 
     try {
       const queryParams = new URLSearchParams({
         tenantId: tenantId.toString(),
         userId: userId.toString(),
-        date: targetDate,
       });
+
+      if (useRange) {
+        queryParams.append('startDate', startDate!);
+        queryParams.append('endDate', endDate!);
+      } else {
+        queryParams.append('date', targetDate);
+      }
 
       if (timezone) {
         queryParams.append('tz', timezone);

@@ -10,8 +10,25 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangeRoleDto } from './dto/change-role.dto';
 import { TenantContextService } from '../tenants/services/tenant-context.service';
+import { TeamsService } from '../teams/teams.service';
 import { hashPassword } from '../common/utils/password.util';
 import { Roles } from '../common/enums/roles.enum';
+
+export interface UserListEntry {
+  id: number;
+  email: string;
+  name: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  locale?: string | null;
+  timezone?: string | null;
+  tenantId: number;
+  role: Roles;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  teams: { id: number; name: string }[];
+}
 
 @Injectable()
 export class UsersService {
@@ -19,6 +36,7 @@ export class UsersService {
     @InjectRepository(User)
     private userRepository: Repository<User>,
     private tenantContextService: TenantContextService,
+    private teamsService: TeamsService,
   ) {}
 
   async create(createUserDto: CreateUserDto, tenantId: number): Promise<User> {
@@ -32,11 +50,26 @@ export class UsersService {
     return this.userRepository.save(user);
   }
 
-  async findAll(tenantId: number): Promise<User[]> {
-    return this.userRepository.find({
+  async findAll(tenantId: number): Promise<UserListEntry[]> {
+    const users = await this.userRepository.find({
       where: { tenantId },
       relations: ['tenant'],
       order: { createdAt: 'DESC' },
+    });
+
+    const userIds = users.map((u) => u.id);
+    const teamsByUserId = await this.teamsService.getTeamsByUserIds(
+      tenantId,
+      userIds,
+    );
+
+    return users.map((user) => {
+      const { password: _password, tenant, ...rest } = user;
+      const teams = teamsByUserId.get(user.id) ?? [];
+      return {
+        ...rest,
+        teams,
+      } as UserListEntry;
     });
   }
 
