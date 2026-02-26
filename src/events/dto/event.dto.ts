@@ -45,4 +45,30 @@ export class EventDto {
   @IsString()
   @IsOptional()
   projectId?: string;
+
+  @IsString()
+  @IsOptional()
+  source?: 'browser' | 'app';
+
+  @IsNumber()
+  @IsOptional()
+  tabId?: number;
+
+  @IsNumber()
+  @IsOptional()
+  windowId?: number;
+
+  @IsNumber()
+  @IsOptional()
+  sequence?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  startTime?: number; // Unix timestamp in milliseconds
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  endTime?: number; // Unix timestamp in milliseconds
 }
