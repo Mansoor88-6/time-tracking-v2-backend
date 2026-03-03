@@ -100,6 +100,24 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
         `Event at index ${index} has negative duration`,
       );
     }
+
+    // Validate startTime and endTime if both are present
+    if (
+      event.startTime !== undefined &&
+      event.endTime !== undefined &&
+      event.endTime < event.startTime
+    ) {
+      throw new BadRequestException(
+        `Event at index ${index} has endTime before startTime`,
+      );
+    }
+
+    // Validate source enum if present
+    if (event.source !== undefined && !['browser', 'app'].includes(event.source)) {
+      throw new BadRequestException(
+        `Event at index ${index} has invalid source: ${event.source}`,
+      );
+    }
   }
 
   async publishToQueue(
