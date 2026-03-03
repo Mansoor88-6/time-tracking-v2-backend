@@ -1,20 +1,17 @@
-import { IsNotEmpty, IsString, IsEnum, IsOptional, IsInt } from 'class-validator';
-import { AppType, AppCategory } from '../entities/team-productivity-rule.entity';
+import { IsNotEmpty, IsEnum, IsInt } from 'class-validator';
+import { Type } from 'class-transformer';
+import { AppCategory } from '../entities/team-productivity-rule.entity';
 
 export class ClassifyUnclassifiedDto {
-  @IsString()
-  @IsNotEmpty()
-  appName: string;
-
-  @IsEnum(AppType)
-  @IsNotEmpty()
-  appType: AppType;
+  @IsInt()
+  @Type(() => Number)
+  unclassifiedId: number;
 
   @IsEnum(AppCategory)
   @IsNotEmpty()
   category: AppCategory;
 
-  @IsOptional()
   @IsInt()
-  applyToTeamId?: number;
+  @Type(() => Number)
+  collectionId: number;
 }

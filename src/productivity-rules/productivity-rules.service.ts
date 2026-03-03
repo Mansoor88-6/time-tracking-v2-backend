@@ -13,6 +13,7 @@ import { BulkCreateRulesDto } from './dto/bulk-create-rules.dto';
 import { ClassifyUnclassifiedDto } from './dto/classify-unclassified.dto';
 import { TeamsService } from '../teams/teams.service';
 import { RuleCollectionTeam } from '../rule-collections/entities/rule-collection-team.entity';
+import { RuleCollectionsService } from '../rule-collections/rule-collections.service';
 
 @Injectable()
 export class ProductivityRulesService {
@@ -24,6 +25,7 @@ export class ProductivityRulesService {
     @InjectRepository(RuleCollectionTeam)
     private readonly collectionTeamsRepository: Repository<RuleCollectionTeam>,
     private readonly teamsService: TeamsService,
+    private readonly ruleCollectionsService: RuleCollectionsService,
   ) {}
 
   async createRule(
@@ -199,62 +201,61 @@ export class ProductivityRulesService {
   async classifyUnclassified(
     tenantId: number,
     dto: ClassifyUnclassifiedDto,
-  ): Promise<{ rule: TeamProductivityRule; unclassified: UnclassifiedApp }> {
-    const normalizedAppName = dto.appName.toLowerCase().trim();
-
-    // Find unclassified app
+  ): Promise<{ rules: TeamProductivityRule[]; unclassified: UnclassifiedApp }> {
+    // Load the exact unclassified row by id
     const unclassified = await this.unclassifiedRepository.findOne({
       where: {
+        id: dto.unclassifiedId,
         tenantId,
-        appName: normalizedAppName,
-        appType: dto.appType,
-        status: UnclassifiedAppStatus.PENDING,
       },
+      relations: ['team'],
     });
 
     if (!unclassified) {
       throw new NotFoundException('Unclassified app not found');
     }
 
-    // Determine which team to apply rule to
-    const teamId = dto.applyToTeamId || unclassified.teamId;
-
-    if (!teamId) {
+    if (unclassified.status !== UnclassifiedAppStatus.PENDING) {
       throw new BadRequestException(
-        'Team ID is required (either from unclassified app or provided)',
+        'Unclassified app is not pending (already classified or reviewed)',
       );
     }
 
-    // Verify team belongs to tenant
-    await this.teamsService.findOne(tenantId, teamId);
-
-    // Create or update rule
-    let rule = await this.rulesRepository.findOne({
-      where: {
-        teamId,
-        appName: normalizedAppName,
-        appType: dto.appType,
-      },
-    });
-
-    if (rule) {
-      rule.category = dto.category;
-      rule = await this.rulesRepository.save(rule);
-    } else {
-      rule = this.rulesRepository.create({
-        teamId,
-        appName: normalizedAppName,
-        appType: dto.appType,
-        category: dto.category,
+    // Ensure collection is assigned to the unclassified row's team (if any)
+    if (unclassified.teamId != null) {
+      const assignments = await this.collectionTeamsRepository.find({
+        where: {
+          collectionId: dto.collectionId,
+          teamId: unclassified.teamId,
+        },
       });
-      rule = await this.rulesRepository.save(rule);
+      if (assignments.length === 0) {
+        await this.ruleCollectionsService.assignToTeams(tenantId, dto.collectionId, {
+          teamIds: [unclassified.teamId],
+        });
+      }
     }
 
-    // Update unclassified app status
+    // Mark this row as classified
     unclassified.status = UnclassifiedAppStatus.CLASSIFIED;
     await this.unclassifiedRepository.save(unclassified);
 
-    return { rule, unclassified };
+    // Add the rule to the collection (creates rules for all teams assigned to the collection)
+    const rules = await this.ruleCollectionsService.addRulesToCollection(
+      tenantId,
+      dto.collectionId,
+      {
+        rules: [
+          {
+            appName: unclassified.appName,
+            appType: unclassified.appType,
+            category: dto.category,
+          },
+        ],
+      },
+    );
+
+    return { rules, unclassified };
   }
 
   // Helper method for worker service to get rules for user's teams

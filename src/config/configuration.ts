@@ -27,4 +27,12 @@ export default () => ({
       10,
     ),
   },
+  agent: {
+    uploadDir:
+      process.env.AGENT_UPLOAD_DIR || 'uploads/agent',
+    maxFileSizeBytes: parseInt(
+      process.env.AGENT_MAX_FILE_SIZE_BYTES || '104857600',
+      10,
+    ), // 100 MB default
+  },
 });

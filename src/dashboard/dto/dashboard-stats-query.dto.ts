@@ -1,9 +1,17 @@
-import { IsString, IsOptional, Matches, ValidateIf } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsInt,
+  Matches,
+  ValidateIf,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 /**
  * Dashboard Stats Query DTO
  *
  * Validates query parameters for dashboard stats endpoint.
+ * Optional userId: when provided, caller must be ORG_ADMIN or SUPER_ADMIN (view-as).
  */
 export class DashboardStatsQueryDto {
   @IsString()
@@ -32,4 +40,9 @@ export class DashboardStatsQueryDto {
   @IsString()
   @IsOptional()
   tz?: string; // IANA timezone, e.g., 'Asia/Karachi'
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  userId?: number; // view-as: only when caller is ORG_ADMIN or SUPER_ADMIN
 }

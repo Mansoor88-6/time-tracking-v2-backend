@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -40,6 +41,14 @@ export class UsersService {
   ) {}
 
   async create(createUserDto: CreateUserDto, tenantId: number): Promise<User> {
+    const existing = await this.userRepository.findOne({
+      where: { email: createUserDto.email, tenantId },
+    });
+    if (existing) {
+      throw new ConflictException(
+        'A user with this email already exists in your organization.',
+      );
+    }
     const hashedPassword = await hashPassword(createUserDto.password);
     const user = this.userRepository.create({
       ...createUserDto,

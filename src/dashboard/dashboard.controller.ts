@@ -5,8 +5,10 @@ import {
   UseGuards,
   Request,
   Logger,
+  ForbiddenException,
 } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
+import { UsersService } from '../users/users.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats-query.dto';
 import { OrganizationStatsQueryDto } from './dto/organization-stats-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,13 +22,17 @@ import { Roles } from '../common/enums/roles.enum';
  *
  * Provides dashboard statistics endpoints.
  * Uses JWT authentication to get tenantId and userId from authenticated user.
+ * Optional query.userId (view-as): allowed only for ORG_ADMIN and SUPER_ADMIN.
  */
 @Controller('api/v1/dashboard')
 @UseGuards(JwtAuthGuard, TenantGuard)
 export class DashboardController {
   private readonly logger = new Logger(DashboardController.name);
 
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(
+    private readonly dashboardService: DashboardService,
+    private readonly usersService: UsersService,
+  ) {}
 
   @Get('stats')
   async getStats(
@@ -34,11 +40,36 @@ export class DashboardController {
     @Request() req: any,
   ) {
     const startTime = Date.now();
-    const { tenantId, id: userId } = req.user;
+    let tenantId = req.user.tenantId as number | undefined;
+    let userId = req.user.id as number;
 
-    this.logger.log(
-      `📊 Dashboard stats request from user ${userId}, tenant ${tenantId}`,
-    );
+    if (query.userId !== undefined && query.userId !== null) {
+      const role = req.user.role;
+      if (role !== Roles.ORG_ADMIN && role !== Roles.SUPER_ADMIN) {
+        throw new ForbiddenException(
+          'Only org admins can view another user\'s dashboard',
+        );
+      }
+      const targetUser = await this.usersService.findOne(
+        query.userId,
+        role === Roles.ORG_ADMIN ? req.user.tenantId : undefined,
+      );
+      tenantId = targetUser.tenantId;
+      userId = targetUser.id;
+      this.logger.log(
+        `📊 Dashboard stats request (view-as) for user ${userId}, tenant ${tenantId}`,
+      );
+    } else {
+      this.logger.log(
+        `📊 Dashboard stats request from user ${userId}, tenant ${tenantId}`,
+      );
+    }
+
+    if (tenantId === undefined) {
+      throw new ForbiddenException(
+        'Tenant context required. Use userId query to view a specific user.',
+      );
+    }
 
     try {
       const stats = await this.dashboardService.getDashboardStats(
@@ -74,11 +105,36 @@ export class DashboardController {
     @Request() req: any,
   ) {
     const startTime = Date.now();
-    const { tenantId, id: userId } = req.user;
+    let tenantId = req.user.tenantId as number | undefined;
+    let userId = req.user.id as number;
 
-    this.logger.log(
-      `📱 App usage request from user ${userId}, tenant ${tenantId}`,
-    );
+    if (query.userId !== undefined && query.userId !== null) {
+      const role = req.user.role;
+      if (role !== Roles.ORG_ADMIN && role !== Roles.SUPER_ADMIN) {
+        throw new ForbiddenException(
+          'Only org admins can view another user\'s app usage',
+        );
+      }
+      const targetUser = await this.usersService.findOne(
+        query.userId,
+        role === Roles.ORG_ADMIN ? req.user.tenantId : undefined,
+      );
+      tenantId = targetUser.tenantId;
+      userId = targetUser.id;
+      this.logger.log(
+        `📱 App usage request (view-as) for user ${userId}, tenant ${tenantId}`,
+      );
+    } else {
+      this.logger.log(
+        `📱 App usage request from user ${userId}, tenant ${tenantId}`,
+      );
+    }
+
+    if (tenantId === undefined) {
+      throw new ForbiddenException(
+        'Tenant context required. Use userId query to view a specific user.',
+      );
+    }
 
     try {
       const appUsage = await this.dashboardService.getAppUsageStats(

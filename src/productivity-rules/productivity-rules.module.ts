@@ -7,6 +7,7 @@ import { UnclassifiedApp } from './entities/unclassified-app.entity';
 import { RuleCollectionTeam } from '../rule-collections/entities/rule-collection-team.entity';
 import { TeamsModule } from '../teams/teams.module';
 import { TenantsModule } from '../tenants/tenants.module';
+import { RuleCollectionsModule } from '../rule-collections/rule-collections.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { TenantsModule } from '../tenants/tenants.module';
     ]),
     TeamsModule,
     TenantsModule,
+    RuleCollectionsModule,
   ],
   controllers: [ProductivityRulesController],
   providers: [ProductivityRulesService],
