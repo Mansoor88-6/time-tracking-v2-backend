@@ -33,6 +33,7 @@ async function bootstrap() {
         'http://localhost:3001',
         'http://127.0.0.1:3000',
         'http://127.0.0.1:3001',
+        'http://192.168.18.18:4000',
       ];
 
   app.enableCors({
@@ -40,6 +41,9 @@ async function bootstrap() {
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
+      // Log incoming origin for debugging
+      console.log('[CORS] Incoming origin:', origin ?? '(no origin header)');
+
       // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) {
         return callback(null, true);
@@ -57,6 +61,7 @@ async function bootstrap() {
           return callback(null, true);
         }
       }
+      console.warn('[CORS] Rejected origin:', origin);
       callback(new Error('Not allowed by CORS'));
     },
     credentials: true,

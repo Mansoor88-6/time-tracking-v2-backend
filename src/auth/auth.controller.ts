@@ -209,7 +209,7 @@ export class AuthController {
       <div class="logo-text">Time Tracking</div>
     </div>
     <h1>Let&#39;s Get Started</h1>
-    <p class="subtitle">Sign in to authorize this device for your account.</p>
+    <p class="subtitle">Sign in to continue.</p>
     <div class="device-info">
       This window was opened by the Time Tracking desktop agent. After signing in, you can close this tab.
     </div>
@@ -229,7 +229,7 @@ export class AuthController {
       <div id="success" class="success" style="display: none;"></div>
     </form>
     <div class="footer">
-      <span>Having trouble?</span> Contact your workspace administrator.
+      <span>Don&#39;t have an account?</span> Contact your workspace administrator.
     </div>
   </div>
   <script>
