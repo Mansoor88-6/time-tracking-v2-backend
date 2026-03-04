@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
 import { TeamsService } from '../teams/teams.service';
+import { Roles } from '../common/enums/roles.enum';
 
 /**
  * Dashboard Service
@@ -359,7 +360,11 @@ export class DashboardService {
 
     try {
       // Get all users in the tenant
-      let allUsers = await this.usersService.findAll(tenantId);
+      // Exclude organization admins from aggregated stats: they should not appear
+      // in dashboard metrics, only in user management.
+      let allUsers = (await this.usersService.findAll(tenantId)).filter(
+        (user) => user.role !== Roles.ORG_ADMIN,
+      );
 
       // Filter by user IDs if provided
       if (query.userId && query.userId.length > 0) {
