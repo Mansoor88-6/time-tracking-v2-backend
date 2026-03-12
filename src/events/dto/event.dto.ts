@@ -71,4 +71,14 @@ export class EventDto {
   @Min(0)
   @IsOptional()
   endTime?: number; // Unix timestamp in milliseconds
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  activeDuration?: number; // milliseconds
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  idleDuration?: number; // milliseconds
 }
