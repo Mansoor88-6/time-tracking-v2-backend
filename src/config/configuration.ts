@@ -4,7 +4,7 @@ export default () => ({
     host: process.env.DB_HOST || '15.235.206.77',
     port: parseInt(process.env.DB_PORT || '5432', 10),
     username: process.env.DB_USERNAME || 'postgres',
-    password: process.env.DB_PASSWORD || '1234',
+    password: process.env.DB_PASSWORD || 'S7m!pQ9vF4zK2xL0',
     name: process.env.DB_NAME || 'time-tracking',
   },
   jwt: {
