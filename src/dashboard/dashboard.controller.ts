@@ -164,6 +164,71 @@ export class DashboardController {
     }
   }
 
+  @Get('timeline')
+  async getTimeline(
+    @Query() query: DashboardStatsQueryDto,
+    @Request() req: any,
+  ) {
+    const startTime = Date.now();
+    let tenantId = req.user.tenantId as number | undefined;
+    let userId = req.user.id as number;
+
+    if (query.userId !== undefined && query.userId !== null) {
+      const role = req.user.role;
+      if (role !== Roles.ORG_ADMIN && role !== Roles.SUPER_ADMIN) {
+        throw new ForbiddenException(
+          'Only org admins can view another user\'s timeline',
+        );
+      }
+      const targetUser = await this.usersService.findOne(
+        query.userId,
+        role === Roles.ORG_ADMIN ? req.user.tenantId : undefined,
+      );
+      tenantId = targetUser.tenantId;
+      userId = targetUser.id;
+      this.logger.log(
+        `📈 Timeline request (view-as) for user ${userId}, tenant ${tenantId}`,
+      );
+    } else {
+      this.logger.log(
+        `📈 Timeline request from user ${userId}, tenant ${tenantId}`,
+      );
+    }
+
+    if (tenantId === undefined) {
+      throw new ForbiddenException(
+        'Tenant context required. Use userId query to view a specific user.',
+      );
+    }
+
+    try {
+      const slots = await this.dashboardService.getTimeline(
+        tenantId,
+        userId,
+        query.date,
+        query.tz,
+        query.startDate,
+        query.endDate,
+      );
+
+      const duration = Date.now() - startTime;
+      this.logger.log(
+        `✅ Timeline response in ${duration}ms for user ${userId}`,
+      );
+
+      return slots;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `❌ Timeline request failed after ${duration}ms for user ${userId}: ${errorMessage}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
+  }
+
   @Get('organization/stats')
   @RolesDecorator(Roles.ORG_ADMIN, Roles.SUPER_ADMIN)
   @UseGuards(RolesGuard)

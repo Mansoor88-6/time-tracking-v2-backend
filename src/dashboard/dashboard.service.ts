@@ -335,6 +335,142 @@ export class DashboardService {
   }
 
   /**
+   * Get timeline slots from worker service
+   *
+   * @param tenantId - Tenant ID from authenticated user
+   * @param userId - User ID from authenticated user
+   * @param date - Date string in YYYY-MM-DD format (optional, defaults to today)
+   * @param timezone - IANA timezone (optional)
+   */
+  async getTimeline(
+    tenantId: number,
+    userId: number,
+    date?: string,
+    timezone?: string,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<any> {
+    const startTime = Date.now();
+    const useRange = !!startDate && !!endDate;
+    const targetDate = date || this.getTodayDateString();
+
+    this.logger.log(
+      `📈 Timeline request: tenant=${tenantId}, user=${userId}, ${
+        useRange ? `range=${startDate}-${endDate}` : `date=${targetDate}`
+      }, tz=${timezone || 'UTC'}`,
+    );
+
+    try {
+      const queryParams = new URLSearchParams({
+        tenantId: tenantId.toString(),
+        userId: userId.toString(),
+      });
+
+      if (useRange) {
+        queryParams.append('startDate', startDate!);
+        queryParams.append('endDate', endDate!);
+      } else {
+        queryParams.append('date', targetDate);
+      }
+
+      if (timezone) {
+        queryParams.append('tz', timezone);
+      }
+
+      const url = `${this.workerServiceUrl}/internal/stats/timeline?${queryParams.toString()}`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        this.requestTimeoutMs,
+      );
+
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'X-Worker-Key': this.workerInternalKey,
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        const duration = Date.now() - startTime;
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          this.logger.error(
+            `❌ Worker service returned error ${response.status} after ${duration}ms: ${errorText}`,
+          );
+
+          if (response.status === 401) {
+            throw new HttpException(
+              'Worker service authentication failed',
+              HttpStatus.INTERNAL_SERVER_ERROR,
+            );
+          } else if (response.status === 503 || response.status >= 500) {
+            throw new ServiceUnavailableException(
+              'Worker service is temporarily unavailable',
+            );
+          } else {
+            throw new HttpException(
+              `Worker service error: ${errorText}`,
+              response.status,
+            );
+          }
+        }
+
+        const data = await response.json();
+        this.logger.log(
+          `✅ Timeline slots retrieved in ${duration}ms for tenant ${tenantId}, user ${userId}`,
+        );
+
+        return data;
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        const duration = Date.now() - startTime;
+
+        if (fetchError.name === 'AbortError') {
+          this.logger.error(
+            `❌ Worker service request timed out after ${this.requestTimeoutMs}ms`,
+          );
+          throw new ServiceUnavailableException(
+            'Worker service request timed out',
+          );
+        }
+
+        if (fetchError instanceof HttpException) {
+          throw fetchError;
+        }
+
+        this.logger.error(
+          `❌ Failed to connect to worker service after ${duration}ms: ${fetchError.message}`,
+          fetchError.stack,
+        );
+        throw new ServiceUnavailableException(
+          'Unable to connect to worker service',
+        );
+      }
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      this.logger.error(
+        `❌ Timeline request failed after ${duration}ms: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new HttpException(
+        'Failed to retrieve timeline data',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Get organization dashboard stats aggregated across multiple users
    *
    * @param tenantId - Tenant ID from authenticated user
