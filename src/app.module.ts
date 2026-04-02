@@ -18,6 +18,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ProductivityRulesModule } from './productivity-rules/productivity-rules.module';
 import { RuleCollectionsModule } from './rule-collections/rule-collections.module';
 import { AgentModule } from './agent/agent.module';
+import { OfflineTimeRequestsModule } from './offline-time-requests/offline-time-requests.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import configuration from './config/configuration';
@@ -57,6 +58,7 @@ import configuration from './config/configuration';
     ProductivityRulesModule,
     RuleCollectionsModule,
     AgentModule,
+    OfflineTimeRequestsModule,
   ],
   controllers: [AppController],
   providers: [
