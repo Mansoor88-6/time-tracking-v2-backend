@@ -19,6 +19,8 @@ import { ProductivityRulesModule } from './productivity-rules/productivity-rules
 import { RuleCollectionsModule } from './rule-collections/rule-collections.module';
 import { AgentModule } from './agent/agent.module';
 import { OfflineTimeRequestsModule } from './offline-time-requests/offline-time-requests.module';
+import { PricingContactModule } from './pricing-contact/pricing-contact.module';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import configuration from './config/configuration';
@@ -29,6 +31,13 @@ import configuration from './config/configuration';
       isGlobal: true,
       load: [configuration],
     }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 10,
+        name: 'default',
+      },
+    ]),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -59,6 +68,7 @@ import configuration from './config/configuration';
     RuleCollectionsModule,
     AgentModule,
     OfflineTimeRequestsModule,
+    PricingContactModule,
   ],
   controllers: [AppController],
   providers: [

@@ -83,10 +83,12 @@ export class DeviceAuthGuard implements CanActivate {
       throw new UnauthorizedException('Device ID or token is required');
     }
 
-    // Find device and verify it's authorized
+    // Find device and verify it's authorized — pick the most recently registered one
+    // in case the same physical device ID was re-registered by a different user
     const device = await this.deviceRepository.findOne({
       where: { deviceId, isAuthorized: true },
       relations: ['user', 'tenant'],
+      order: { id: 'DESC' },
     });
 
     if (!device) {

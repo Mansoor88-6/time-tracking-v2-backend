@@ -12,7 +12,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
-import { join } from 'path';
+import { resolve } from 'path';
 import { AgentService, AgentInfo, ExtensionInfo } from './agent.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -54,7 +54,8 @@ export class AgentController {
     if (!filePath) {
       throw new NotFoundException('Tracking agent is not available');
     }
-    const absolutePath = join(process.cwd(), filePath);
+    // resolve() — do not use join(cwd, absolutePath); that yields /app/app/... when filePath is absolute
+    const absolutePath = resolve(filePath);
     res.setHeader(
       'Content-Disposition',
       'attachment; filename="tracking-agent.exe"',
@@ -93,7 +94,7 @@ export class AgentController {
     if (!filePath) {
       throw new NotFoundException('Browser extension is not available');
     }
-    const absolutePath = join(process.cwd(), filePath);
+    const absolutePath = resolve(filePath);
     res.setHeader(
       'Content-Disposition',
       'attachment; filename="browser-extension.zip"',
