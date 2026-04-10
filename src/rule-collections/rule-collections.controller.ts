@@ -16,6 +16,7 @@ import { CreateCollectionDto } from './dto/create-collection.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
 import { AddRulesToCollectionDto } from './dto/add-rules-to-collection.dto';
 import { AssignCollectionToTeamsDto } from './dto/assign-collection-to-teams.dto';
+import { CopyRulesFromCollectionDto } from './dto/copy-rules-from-collection.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../auth/guards/tenant.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -115,6 +116,21 @@ export class RuleCollectionsController {
       req.user.tenantId,
       id,
       dto,
+    );
+  }
+
+  @Post(':id/copy-rules')
+  @RolesDecorator(Roles.ORG_ADMIN)
+  @UseGuards(RolesGuard)
+  copyRulesFrom(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CopyRulesFromCollectionDto,
+    @Request() req,
+  ) {
+    return this.ruleCollectionsService.copyRulesFromCollection(
+      req.user.tenantId,
+      id,
+      dto.sourceCollectionId,
     );
   }
 

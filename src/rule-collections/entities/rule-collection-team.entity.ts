@@ -13,7 +13,8 @@ import { Team } from '../../teams/entities/team.entity';
 @Entity()
 @Index(['collectionId'])
 @Index(['teamId'])
-@Unique(['collectionId', 'teamId'])
+/** Each team may belong to at most one rule collection (enforced in DB + service). */
+@Unique(['teamId'])
 export class RuleCollectionTeam extends BaseEntity {
   @Column()
   collectionId: number;

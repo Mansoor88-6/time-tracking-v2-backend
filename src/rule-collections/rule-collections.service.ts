@@ -6,13 +6,13 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, EntityManager } from 'typeorm';
 import { RuleCollection } from './entities/rule-collection.entity';
 import { RuleCollectionTeam } from './entities/rule-collection-team.entity';
 import { TeamProductivityRule, AppType, AppCategory, RuleType } from '../productivity-rules/entities/team-productivity-rule.entity';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
-import { AddRulesToCollectionDto } from './dto/add-rules-to-collection.dto';
+import { AddRulesToCollectionDto, RuleDto } from './dto/add-rules-to-collection.dto';
 import { AssignCollectionToTeamsDto } from './dto/assign-collection-to-teams.dto';
 import { TeamsService } from '../teams/teams.service';
 
@@ -36,6 +36,230 @@ export class RuleCollectionsService {
     @Inject(forwardRef(() => TeamsService))
     private readonly teamsService: TeamsService,
   ) {}
+
+  /**
+   * One team may only appear in one rule collection. Throws if any team is already assigned elsewhere.
+   */
+  private async assertTeamsExclusiveForNewCollection(
+    teamIds: number[],
+  ): Promise<void> {
+    for (const teamId of teamIds) {
+      const rows = await this.collectionTeamsRepository.find({
+        where: { teamId },
+        relations: ['collection'],
+      });
+      if (rows.length > 0) {
+        const row = rows[0];
+        const name = row.collection?.name ?? row.collectionId;
+        throw new BadRequestException(
+          `Team is already assigned to rule collection "${name}" (id ${row.collectionId}). Each team may only belong to one rule collection.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * When assigning teams to an existing collection, each team must not belong to another collection.
+   */
+  private async assertTeamsExclusiveForCollection(
+    teamIds: number[],
+    collectionId: number,
+  ): Promise<void> {
+    for (const teamId of teamIds) {
+      const rows = await this.collectionTeamsRepository.find({
+        where: { teamId },
+        relations: ['collection'],
+      });
+      for (const row of rows) {
+        if (row.collectionId !== collectionId) {
+          const name = row.collection?.name ?? row.collectionId;
+          throw new BadRequestException(
+            `Team is already assigned to rule collection "${name}" (id ${row.collectionId}). Each team may only belong to one rule collection.`,
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Remove rows that would block insert for this collection: same team+app+type within this
+   * collection, legacy rows (collectionId null), but not rules owned by another collection
+   * (impossible when one team ↔ one collection holds).
+   */
+  private async deleteRuleSlotForTeamAndCollection(
+    teamId: number,
+    appName: string,
+    appType: AppType,
+    collectionId: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repo = manager
+      ? manager.getRepository(TeamProductivityRule)
+      : this.rulesRepository;
+    await repo
+      .createQueryBuilder()
+      .delete()
+      .from(TeamProductivityRule)
+      .where('teamId = :teamId', { teamId })
+      .andWhere('appName = :appName', { appName })
+      .andWhere('appType = :appType', { appType })
+      .andWhere('(collectionId = :cid OR collectionId IS NULL)', { cid: collectionId })
+      .execute();
+  }
+
+  /**
+   * Normalize a rule the same way as persistence (domain extraction, etc.).
+   * Used for deduping and for scoped deletes before insert.
+   */
+  private resolveRuleFields(rule: RuleDto): {
+    finalAppName: string;
+    appType: AppType;
+    category: AppCategory;
+    ruleType: RuleType;
+    pattern: string | undefined;
+    isDomainRule: boolean;
+  } {
+    const normalizedAppName = rule.appName.toLowerCase().trim();
+    const ruleType =
+      rule.ruleType ??
+      this.determineRuleType(rule.appName, rule.appType, rule.pattern);
+    const pattern = rule.pattern ?? undefined;
+    const isDomainRule = ruleType === RuleType.DOMAIN;
+
+    if (
+      pattern &&
+      (ruleType === RuleType.URL_EXACT || ruleType === RuleType.URL_PATTERN)
+    ) {
+      this.validateURLPattern(pattern);
+    }
+
+    let finalAppName = normalizedAppName;
+    if (ruleType === RuleType.DOMAIN && this.isURL(normalizedAppName)) {
+      finalAppName = this.extractDomainFromURL(normalizedAppName);
+    }
+
+    return {
+      finalAppName,
+      appType: rule.appType,
+      category: rule.category,
+      ruleType,
+      pattern,
+      isDomainRule,
+    };
+  }
+
+  /**
+   * DB unique is (teamId, appName, appType). Collapse duplicate app keys in one
+   * payload to one row per (finalAppName, appType). Last rule wins.
+   */
+  private dedupeRulesByAppKey(rules: RuleDto[]): RuleDto[] {
+    const byKey = new Map<string, RuleDto>();
+    for (const rule of rules) {
+      const p = this.resolveRuleFields(rule);
+      const key = `${p.finalAppName}\0${p.appType}`;
+      byKey.set(key, rule);
+    }
+    return [...byKey.values()];
+  }
+
+  /**
+   * Dedupe persisted rules into template RuleDto rows. Key includes rule type and pattern
+   * so URL rules do not collapse incorrectly.
+   */
+  private dedupeRuleEntitiesToTemplates(rules: TeamProductivityRule[]): RuleDto[] {
+    const byKey = new Map<string, RuleDto>();
+    for (const r of rules) {
+      const dto: RuleDto = {
+        appName: r.appName,
+        appType: r.appType,
+        category: r.category,
+        ruleType: r.ruleType,
+        pattern: r.pattern ?? undefined,
+      };
+      const p = this.resolveRuleFields(dto);
+      const key = `${p.finalAppName}\0${p.appType}\0${p.ruleType}\0${p.pattern ?? ''}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, dto);
+      }
+    }
+    return [...byKey.values()];
+  }
+
+  /**
+   * Copy rule definitions from another collection: applies deduplicated templates to every
+   * team assigned to the target collection. Overwrites matching (team, app, type) slots.
+   */
+  async copyRulesFromCollection(
+    tenantId: number,
+    targetCollectionId: number,
+    sourceCollectionId: number,
+  ): Promise<{ templateCount: number; rulesWritten: number }> {
+    if (targetCollectionId === sourceCollectionId) {
+      throw new BadRequestException(
+        'Source and target collection must be different.',
+      );
+    }
+
+    await this.findOne(tenantId, targetCollectionId);
+    await this.findOne(tenantId, sourceCollectionId);
+
+    const sourceRules = await this.rulesRepository.find({
+      where: { collectionId: sourceCollectionId },
+    });
+
+    const teamAssignments = await this.collectionTeamsRepository.find({
+      where: { collectionId: targetCollectionId },
+    });
+
+    if (teamAssignments.length === 0) {
+      throw new BadRequestException(
+        'Target collection must be assigned to at least one team before importing rules.',
+      );
+    }
+
+    const templates = this.dedupeRuleEntitiesToTemplates(sourceRules);
+    if (templates.length === 0) {
+      return { templateCount: 0, rulesWritten: 0 };
+    }
+
+    const deduped = this.dedupeRulesByAppKey(templates);
+    const teamIds = teamAssignments.map((ta) => ta.teamId);
+    const rules: TeamProductivityRule[] = [];
+
+    for (const teamId of teamIds) {
+      for (const rule of deduped) {
+        const resolved = this.resolveRuleFields(rule);
+        await this.deleteRuleSlotForTeamAndCollection(
+          teamId,
+          resolved.finalAppName,
+          resolved.appType,
+          targetCollectionId,
+        );
+
+        rules.push(
+          this.rulesRepository.create({
+            teamId,
+            collectionId: targetCollectionId,
+            appName: resolved.finalAppName,
+            appType: resolved.appType,
+            category: resolved.category,
+            ruleType: resolved.ruleType,
+            pattern: resolved.pattern ?? undefined,
+            isDomainRule: resolved.isDomainRule,
+          }),
+        );
+      }
+    }
+
+    if (rules.length > 0) {
+      await this.rulesRepository.save(rules);
+    }
+
+    return {
+      templateCount: deduped.length,
+      rulesWritten: rules.length,
+    };
+  }
 
   /**
    * Get suggested apps/domains from hardcoded list
@@ -128,6 +352,8 @@ export class RuleCollectionsService {
       await this.teamsService.findOne(tenantId, teamId);
     }
 
+    await this.assertTeamsExclusiveForNewCollection(dto.teamIds);
+
     // Create collection
     const collection = this.collectionsRepository.create({
       name: dto.name,
@@ -146,51 +372,32 @@ export class RuleCollectionsService {
     );
     await this.collectionTeamsRepository.save(teamAssignments);
 
-    // Create rules for each team
+    const dedupedRules = this.dedupeRulesByAppKey(dto.rules);
+
+    // Scoped delete: this collection + legacy (null collectionId) only — never another collection’s rows
     const rules: TeamProductivityRule[] = [];
     for (const teamId of dto.teamIds) {
-      for (const rule of dto.rules) {
-        const normalizedAppName = rule.appName.toLowerCase().trim();
-        
-        // Check if rule already exists
-        const existing = await this.rulesRepository.findOne({
-          where: {
+      for (const rule of dedupedRules) {
+        const resolved = this.resolveRuleFields(rule);
+        await this.deleteRuleSlotForTeamAndCollection(
+          teamId,
+          resolved.finalAppName,
+          resolved.appType,
+          savedCollection.id,
+        );
+
+        rules.push(
+          this.rulesRepository.create({
             teamId,
-            appName: normalizedAppName,
-            appType: rule.appType,
-          },
-        });
-
-        if (!existing) {
-          // Determine rule type and pattern
-          const ruleType = rule.ruleType || this.determineRuleType(rule.appName, rule.appType, rule.pattern);
-          const pattern = rule.pattern || undefined;
-          const isDomainRule = ruleType === RuleType.DOMAIN;
-
-          // Validate pattern if provided
-          if (pattern && (ruleType === RuleType.URL_EXACT || ruleType === RuleType.URL_PATTERN)) {
-            this.validateURLPattern(pattern);
-          }
-
-          // For domain/URL rules, extract domain from appName if it's a URL
-          let finalAppName = normalizedAppName;
-          if (ruleType === RuleType.DOMAIN && this.isURL(normalizedAppName)) {
-            finalAppName = this.extractDomainFromURL(normalizedAppName);
-          }
-
-          rules.push(
-            this.rulesRepository.create({
-              teamId,
-              collectionId: savedCollection.id,
-              appName: finalAppName,
-              appType: rule.appType,
-              category: rule.category,
-              ruleType,
-              pattern: pattern || undefined,
-              isDomainRule,
-            }),
-          );
-        }
+            collectionId: savedCollection.id,
+            appName: resolved.finalAppName,
+            appType: resolved.appType,
+            category: resolved.category,
+            ruleType: resolved.ruleType,
+            pattern: resolved.pattern ?? undefined,
+            isDomainRule: resolved.isDomainRule,
+          }),
+        );
       }
     }
 
@@ -252,6 +459,7 @@ export class RuleCollectionsService {
       await manager.save(RuleCollection, collection);
 
       if (dto.teamIds !== undefined) {
+        await this.assertTeamsExclusiveForCollection(dto.teamIds, id);
         await manager.delete(RuleCollectionTeam, { collectionId: id });
         const teamAssignments = dto.teamIds.map((teamId) =>
           manager.create(RuleCollectionTeam, {
@@ -273,33 +481,30 @@ export class RuleCollectionsService {
         const teamIds = teamAssignments.map((ta) => ta.teamId);
 
         if (teamIds.length > 0 && dto.rules.length > 0) {
+          const dedupedRules = this.dedupeRulesByAppKey(dto.rules);
           const rulesToInsert: TeamProductivityRule[] = [];
+
           for (const teamId of teamIds) {
-            for (const rule of dto.rules) {
-              const normalizedAppName = rule.appName.toLowerCase().trim();
-              const ruleType = rule.ruleType ?? this.determineRuleType(rule.appName, rule.appType, rule.pattern);
-              const pattern = rule.pattern ?? undefined;
-              const isDomainRule = ruleType === RuleType.DOMAIN;
-
-              if (pattern && (ruleType === RuleType.URL_EXACT || ruleType === RuleType.URL_PATTERN)) {
-                this.validateURLPattern(pattern);
-              }
-
-              let finalAppName = normalizedAppName;
-              if (ruleType === RuleType.DOMAIN && this.isURL(normalizedAppName)) {
-                finalAppName = this.extractDomainFromURL(normalizedAppName);
-              }
+            for (const rule of dedupedRules) {
+              const resolved = this.resolveRuleFields(rule);
+              await this.deleteRuleSlotForTeamAndCollection(
+                teamId,
+                resolved.finalAppName,
+                resolved.appType,
+                id,
+                manager,
+              );
 
               rulesToInsert.push(
                 manager.create(TeamProductivityRule, {
                   teamId,
                   collectionId: id,
-                  appName: finalAppName,
-                  appType: rule.appType,
-                  category: rule.category,
-                  ruleType,
-                  pattern: pattern ?? undefined,
-                  isDomainRule,
+                  appName: resolved.finalAppName,
+                  appType: resolved.appType,
+                  category: resolved.category,
+                  ruleType: resolved.ruleType,
+                  pattern: resolved.pattern ?? undefined,
+                  isDomainRule: resolved.isDomainRule,
                 }),
               );
             }
@@ -339,51 +544,31 @@ export class RuleCollectionsService {
     }
 
     const teamIds = teamAssignments.map((ta) => ta.teamId);
+    const dedupedRules = this.dedupeRulesByAppKey(dto.rules);
     const rules: TeamProductivityRule[] = [];
 
     for (const teamId of teamIds) {
-      for (const rule of dto.rules) {
-        const normalizedAppName = rule.appName.toLowerCase().trim();
+      for (const rule of dedupedRules) {
+        const resolved = this.resolveRuleFields(rule);
+        await this.deleteRuleSlotForTeamAndCollection(
+          teamId,
+          resolved.finalAppName,
+          resolved.appType,
+          collection.id,
+        );
 
-        // Check if rule already exists
-        const existing = await this.rulesRepository.findOne({
-          where: {
+        rules.push(
+          this.rulesRepository.create({
             teamId,
-            appName: normalizedAppName,
-            appType: rule.appType,
-          },
-        });
-
-        if (!existing) {
-          // Determine rule type and pattern
-          const ruleType = rule.ruleType || this.determineRuleType(rule.appName, rule.appType, rule.pattern);
-          const pattern = rule.pattern || undefined;
-          const isDomainRule = ruleType === RuleType.DOMAIN;
-
-          // Validate pattern if provided
-          if (pattern && (ruleType === RuleType.URL_EXACT || ruleType === RuleType.URL_PATTERN)) {
-            this.validateURLPattern(pattern);
-          }
-
-          // For domain/URL rules, extract domain from appName if it's a URL
-          let finalAppName = normalizedAppName;
-          if (ruleType === RuleType.DOMAIN && this.isURL(normalizedAppName)) {
-            finalAppName = this.extractDomainFromURL(normalizedAppName);
-          }
-
-          rules.push(
-            this.rulesRepository.create({
-              teamId,
-              collectionId: collection.id,
-              appName: finalAppName,
-              appType: rule.appType,
-              category: rule.category,
-              ruleType,
-              pattern: pattern || undefined,
-              isDomainRule,
-            }),
-          );
-        }
+            collectionId: collection.id,
+            appName: resolved.finalAppName,
+            appType: resolved.appType,
+            category: resolved.category,
+            ruleType: resolved.ruleType,
+            pattern: resolved.pattern ?? undefined,
+            isDomainRule: resolved.isDomainRule,
+          }),
+        );
       }
     }
 
@@ -425,6 +610,8 @@ export class RuleCollectionsService {
     for (const teamId of dto.teamIds) {
       await this.teamsService.findOne(tenantId, teamId);
     }
+
+    await this.assertTeamsExclusiveForCollection(dto.teamIds, collection.id);
 
     const assignments: RuleCollectionTeam[] = [];
 

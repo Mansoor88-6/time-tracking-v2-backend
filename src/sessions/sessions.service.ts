@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, MoreThan, Repository } from 'typeorm';
 import {
   SessionClientType,
   UserSession,
@@ -89,11 +89,80 @@ export class SessionsService {
     });
   }
 
+  /**
+   * Non-revoked sessions that are not past refresh expiry (still "active" for listing).
+   */
+  async findActiveUserSessions(userId: number): Promise<UserSession[]> {
+    const now = new Date();
+    return this.sessionsRepository.find({
+      where: {
+        userId,
+        revokedAt: IsNull(),
+        expiresAt: MoreThan(now),
+      },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async findTenantSessions(tenantId: number): Promise<UserSession[]> {
     return this.sessionsRepository.find({
       where: { tenantId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async findActiveSessionsForTenant(tenantId: number): Promise<UserSession[]> {
+    const now = new Date();
+    return this.sessionsRepository.find({
+      where: {
+        tenantId,
+        revokedAt: IsNull(),
+        expiresAt: MoreThan(now),
+      },
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /** All active tenant-user sessions (platform super admin). */
+  async findAllActiveSessions(): Promise<UserSession[]> {
+    const now = new Date();
+    return this.sessionsRepository.find({
+      where: {
+        revokedAt: IsNull(),
+        expiresAt: MoreThan(now),
+      },
+      relations: ['user', 'tenant'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async findSessionById(id: number): Promise<UserSession | null> {
+    return this.sessionsRepository.findOne({
+      where: { id },
+    });
+  }
+
+  /**
+   * Strip secrets before sending to clients.
+   */
+  toPublicSession(session: UserSession): Record<string, unknown> {
+    return {
+      id: session.id,
+      userId: session.userId,
+      userName: session.user?.name ?? null,
+      userEmail: session.user?.email ?? null,
+      tenantId: session.tenantId,
+      tenantName: session.tenant?.name ?? null,
+      deviceId: session.deviceId,
+      deviceName: session.deviceName,
+      userAgent: session.userAgent,
+      ipAddress: session.ipAddress,
+      clientType: session.clientType,
+      createdAt: session.createdAt,
+      lastSeenAt: session.lastSeenAt,
+      expiresAt: session.expiresAt,
+    };
   }
 }
 

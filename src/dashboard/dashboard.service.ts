@@ -565,6 +565,8 @@ export class DashboardService {
             userName: user.name,
             userEmail: user.email,
             stats: {
+              arrivalTime: null,
+              leftTime: null,
               productiveTimeMs: 0,
               deskTimeMs: 0,
               timeAtWorkMs: 0,
