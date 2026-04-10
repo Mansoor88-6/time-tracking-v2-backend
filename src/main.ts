@@ -26,7 +26,8 @@ async function bootstrap() {
   // Enable CORS
   // When credentials: true, origin cannot be '*', must be specific origin(s)
   const frontendUrl = process.env.FRONTEND_URL;
-  const allowedOrigins = frontendUrl
+  const corsExtra = process.env.CORS_EXTRA_ORIGINS;
+  const fromFrontend = frontendUrl
     ? frontendUrl.split(',').map((url) => url.trim())
     : [
         'http://localhost:3000',
@@ -35,6 +36,14 @@ async function bootstrap() {
         'http://127.0.0.1:3001',
         'http://192.168.18.18:4000',
       ];
+  const fromExtra = corsExtra
+    ? corsExtra.split(',').map((u) => u.trim()).filter(Boolean)
+    : [];
+  const allowedOrigins = [...new Set([...fromFrontend, ...fromExtra])];
+  console.log(
+    `[CORS] Allowed origins (${allowedOrigins.length}):`,
+    allowedOrigins.join(', '),
+  );
 
   app.enableCors({
     origin: (
