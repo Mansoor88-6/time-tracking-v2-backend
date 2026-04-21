@@ -22,6 +22,10 @@ export class OfflineTimeRequest extends BaseEntity {
   @Column({ type: 'text' })
   description: string;
 
+  /** Same UUID on each segment when the user submits one dialog with multiple disjoint ranges. */
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  submitBatchId: string | null;
+
   @Column({
     type: 'enum',
     enum: OfflineTimeCategory,

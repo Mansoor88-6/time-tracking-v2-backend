@@ -19,3 +19,6 @@ CREATE INDEX IF NOT EXISTS idx_offline_time_requests_tenant_status
   ON offline_time_requests ("tenantId", status);
 CREATE INDEX IF NOT EXISTS idx_offline_time_requests_user
   ON offline_time_requests ("userId");
+
+-- Optional: group rows from one multi-segment submit (run if synchronize is disabled)
+-- ALTER TABLE offline_time_requests ADD COLUMN IF NOT EXISTS "submitBatchId" varchar(36);

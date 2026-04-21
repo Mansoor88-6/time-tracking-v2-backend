@@ -215,11 +215,9 @@ export class ProductivityRulesService {
       throw new NotFoundException('Unclassified app not found');
     }
 
-    if (unclassified.status !== UnclassifiedAppStatus.PENDING) {
-      throw new BadRequestException(
-        'Unclassified app is not pending (already classified or reviewed)',
-      );
-    }
+    // Allow reclassification from any visible state (pending/reviewed/classified).
+    // This supports admin flows where a rule was removed from a collection and the
+    // same app/domain needs to be classified again.
 
     // Ensure collection is assigned to the unclassified row's team (if any)
     if (unclassified.teamId != null) {

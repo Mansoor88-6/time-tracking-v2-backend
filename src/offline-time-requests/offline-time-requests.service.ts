@@ -85,6 +85,7 @@ export class OfflineTimeRequestsService {
       endAt: end,
       description: dto.description.trim(),
       category: dto.category,
+      submitBatchId: dto.submitBatchId?.trim() || null,
       status: OfflineTimeRequestStatus.PENDING,
       reviewedByUserId: null,
       reviewedAt: null,

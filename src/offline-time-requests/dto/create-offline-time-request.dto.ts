@@ -4,6 +4,8 @@ import {
   IsDateString,
   MinLength,
   MaxLength,
+  IsOptional,
+  Matches,
 } from 'class-validator';
 import { OfflineTimeCategory } from '../enums/offline-time-category.enum';
 
@@ -21,4 +23,12 @@ export class CreateOfflineTimeRequestDto {
 
   @IsEnum(OfflineTimeCategory)
   category: OfflineTimeCategory;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(36)
+  @Matches(/^[0-9a-f-]{36}$/i, {
+    message: 'submitBatchId must be a UUID when provided',
+  })
+  submitBatchId?: string;
 }
