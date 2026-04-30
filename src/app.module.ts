@@ -20,7 +20,7 @@ import { RuleCollectionsModule } from './rule-collections/rule-collections.modul
 import { AgentModule } from './agent/agent.module';
 import { OfflineTimeRequestsModule } from './offline-time-requests/offline-time-requests.module';
 import { PricingContactModule } from './pricing-contact/pricing-contact.module';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import configuration from './config/configuration';
@@ -34,7 +34,7 @@ import configuration from './config/configuration';
     ThrottlerModule.forRoot([
       {
         ttl: 60000,
-        limit: 10,
+        limit: 120,
         name: 'default',
       },
     ]),
@@ -73,6 +73,10 @@ import configuration from './config/configuration';
   controllers: [AppController],
   providers: [
     AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

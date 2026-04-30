@@ -46,3 +46,29 @@ export class DashboardStatsQueryDto {
   @IsInt()
   userId?: number; // view-as: only when caller is ORG_ADMIN or SUPER_ADMIN
 }
+
+/**
+ * Month overview grid: requires inclusive startDate and endDate.
+ */
+export class DashboardMonthCalendarQueryDto {
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'startDate must be in YYYY-MM-DD format',
+  })
+  startDate: string;
+
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'endDate must be in YYYY-MM-DD format',
+  })
+  endDate: string;
+
+  @IsString()
+  @IsOptional()
+  tz?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  userId?: number;
+}

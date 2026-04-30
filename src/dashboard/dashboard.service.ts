@@ -197,8 +197,111 @@ export class DashboardService {
   }
 
   /**
-   * Get today's date string in YYYY-MM-DD format
+   * Per-day stats for month overview grid (proxies worker month-calendar).
    */
+  async getMonthCalendarStats(
+    tenantId: number,
+    userId: number,
+    startDate: string,
+    endDate: string,
+    timezone?: string,
+  ): Promise<{ days: unknown[] }> {
+    const startTime = Date.now();
+    const monthCalTimeoutMs = Math.max(this.requestTimeoutMs, 30_000);
+
+    this.logger.log(
+      `🗓️ Month calendar proxy: tenant=${tenantId}, user=${userId}, ${startDate}–${endDate}, tz=${timezone || 'UTC'}`,
+    );
+
+    try {
+      const queryParams = new URLSearchParams({
+        tenantId: tenantId.toString(),
+        userId: userId.toString(),
+        startDate,
+        endDate,
+      });
+      if (timezone) queryParams.append('tz', timezone);
+
+      const url = `${this.workerServiceUrl}/internal/stats/month-calendar?${queryParams.toString()}`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        monthCalTimeoutMs,
+      );
+
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'X-Worker-Key': this.workerInternalKey,
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+        const duration = Date.now() - startTime;
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          this.logger.error(
+            `❌ Worker month-calendar error ${response.status} after ${duration}ms: ${errorText}`,
+          );
+          if (response.status === 401) {
+            throw new HttpException(
+              'Worker service authentication failed',
+              HttpStatus.INTERNAL_SERVER_ERROR,
+            );
+          }
+          if (response.status === 503 || response.status >= 500) {
+            throw new ServiceUnavailableException(
+              'Worker service is temporarily unavailable',
+            );
+          }
+          throw new HttpException(
+            `Worker service error: ${errorText}`,
+            response.status,
+          );
+        }
+
+        const data = (await response.json()) as { days: unknown[] };
+        this.logger.log(
+          `✅ Month calendar retrieved in ${duration}ms for tenant ${tenantId}, user ${userId}`,
+        );
+        return data;
+      } catch (fetchError: unknown) {
+        clearTimeout(timeoutId);
+        const duration = Date.now() - startTime;
+        const err = fetchError as { name?: string };
+        if (err.name === 'AbortError') {
+          this.logger.error(
+            `❌ Worker month-calendar timed out after ${monthCalTimeoutMs}ms`,
+          );
+          throw new ServiceUnavailableException(
+            'Worker service request timed out',
+          );
+        }
+        if (fetchError instanceof HttpException) throw fetchError;
+        this.logger.error(
+          `❌ Month calendar fetch failed after ${duration}ms: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`,
+        );
+        throw new ServiceUnavailableException(
+          'Unable to connect to worker service',
+        );
+      }
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.error(
+        `❌ Month calendar failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw new HttpException(
+        'Failed to retrieve month calendar statistics',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   /**
    * Get app usage stats from worker service
    *
@@ -636,6 +739,126 @@ export class DashboardService {
         'Failed to retrieve organization dashboard statistics',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+
+  /**
+   * Roster for end users: tenant members (excluding org/platform admins) with
+   * online status from recent worker events.
+   */
+  async getColleagues(
+    tenantId: number,
+    _currentUserId: number,
+    windowSec?: number,
+  ): Promise<{
+    windowSec: number;
+    colleagues: Array<{
+      id: number;
+      name: string | null;
+      displayName: string | null;
+      email: string;
+      teams: { id: number; name: string }[];
+      teamLabel: string;
+      isOnline: boolean;
+      lastActivityAt: string | null;
+      avatarInitial: string;
+    }>;
+  }> {
+    const requested = windowSec ?? 120;
+    const w = Math.min(600, Math.max(30, requested));
+
+    let presence: Record<string, string> = {};
+    try {
+      presence = await this.getColleaguesPresenceFromWorker(tenantId, w);
+    } catch (err) {
+      this.logger.warn(
+        `Colleagues presence unavailable, everyone shown offline: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const all = await this.usersService.findAll(tenantId);
+    const colleaguesUsers = all.filter(
+      (u) =>
+        u.role !== Roles.ORG_ADMIN &&
+        u.role !== Roles.SUPER_ADMIN &&
+        u.isActive !== false,
+    );
+
+    const colleagues = colleaguesUsers.map((u) => {
+      const lastIso = presence[String(u.id)] ?? null;
+      const isOnline = lastIso != null;
+      const teams = u.teams ?? [];
+      const teamLabel =
+        teams.length > 0
+          ? teams.map((t) => t.name).join(', ')
+          : 'Without team';
+      const display =
+        (u.displayName && u.displayName.trim()) ||
+        (u.name && u.name.trim()) ||
+        '';
+      const initial = (display || u.email || '?')
+        .charAt(0)
+        .toUpperCase();
+      return {
+        id: u.id,
+        name: u.name ?? null,
+        displayName: u.displayName ?? null,
+        email: u.email,
+        teams,
+        teamLabel,
+        isOnline,
+        lastActivityAt: lastIso,
+        avatarInitial: initial,
+      };
+    });
+
+    colleagues.sort((a, b) => {
+      const an = (a.displayName || a.name || a.email).toLowerCase();
+      const bn = (b.displayName || b.name || b.email).toLowerCase();
+      return an.localeCompare(bn);
+    });
+
+    return { windowSec: w, colleagues };
+  }
+
+  private async getColleaguesPresenceFromWorker(
+    tenantId: number,
+    windowSec: number,
+  ): Promise<Record<string, string>> {
+    const queryParams = new URLSearchParams({
+      tenantId: String(tenantId),
+      windowSec: String(windowSec),
+    });
+    const url = `${this.workerServiceUrl}/internal/stats/colleagues-presence?${queryParams.toString()}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      Math.min(15000, this.requestTimeoutMs * 2),
+    );
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'X-Worker-Key': this.workerInternalKey,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Worker colleagues-presence ${response.status}: ${text}`);
+      }
+
+      const data = (await response.json()) as {
+        presence: Record<string, string>;
+        windowSec: number;
+      };
+      return data.presence ?? {};
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 

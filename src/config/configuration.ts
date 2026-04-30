@@ -35,4 +35,8 @@ export default () => ({
       10,
     ), // 100 MB default
   },
+  /** Matches worker: extra comma-separated app names merged with loginwindow + LockApp */
+  events: {
+    systemIdleAppDenylist: process.env.SYSTEM_IDLE_APP_DENYLIST ?? '',
+  },
 });

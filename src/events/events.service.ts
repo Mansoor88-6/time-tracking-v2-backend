@@ -10,6 +10,10 @@ import { ClientKafka } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
 import { BatchEventDto } from './dto/batch-event.dto';
 import { EventDto, EventStatus } from './dto/event.dto';
+import {
+  buildSystemIdleDenySet,
+  sanitizeSystemIdleRawEvents,
+} from './system-idle-raw-event.sanitizer';
 
 @Injectable()
 export class EventsService implements OnModuleInit, OnModuleDestroy {
@@ -17,11 +21,16 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   private readonly maxBatchSize = 1000;
   private readonly maxTimestampAge = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
   private readonly maxTimestampFuture = 5 * 60 * 1000; // 5 minutes in ms
+  private readonly systemIdleDenySet: Set<string>;
 
   constructor(
     @Inject('KAFKA_CLIENT') private readonly kafkaClient: ClientKafka,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    this.systemIdleDenySet = buildSystemIdleDenySet(
+      this.configService.get<string>('events.systemIdleAppDenylist'),
+    );
+  }
 
   async onModuleInit() {
     // Connect to Kafka
@@ -128,8 +137,14 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const topic = this.configService.get<string>('kafka.topicRawEvents');
 
+    const sanitizedEvents = sanitizeSystemIdleRawEvents(
+      batch.events,
+      this.systemIdleDenySet,
+    );
+
     const message = {
       ...batch,
+      events: sanitizedEvents,
       tenantId,
       userId,
       ingestedAt: Date.now(),
@@ -140,7 +155,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       // Note: Transient errors during topic creation/leader election are handled by KafkaJS retries
       await this.kafkaClient.emit(topic, message);
       this.logger.log(
-        `✅ Published batch of ${batch.events.length} events to ${topic} for device ${deviceId}`,
+        `✅ Published batch of ${sanitizedEvents.length} events to ${topic} for device ${deviceId}`,
       );
     } catch (error) {
       // Only log as error if it's a persistent failure

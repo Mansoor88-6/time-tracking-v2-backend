@@ -13,7 +13,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { resolve } from 'path';
-import { AgentService, AgentInfo, ExtensionInfo } from './agent.service';
+import { AgentService, AgentInfo } from './agent.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { RolesDecorator } from '../auth/decorators/roles.decorator';
@@ -54,7 +54,6 @@ export class AgentController {
     if (!filePath) {
       throw new NotFoundException('Tracking agent is not available');
     }
-    // resolve() — do not use join(cwd, absolutePath); that yields /app/app/... when filePath is absolute
     const absolutePath = resolve(filePath);
     res.setHeader(
       'Content-Disposition',
@@ -65,39 +64,39 @@ export class AgentController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @RolesDecorator(Roles.SUPER_ADMIN)
-  @Post('extension/upload')
+  @Post('mac/upload')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
       limits: { fileSize: MAX_FILE_SIZE },
     }),
   )
-  async uploadExtension(
+  async uploadMac(
     @UploadedFile() file: Express.Multer.File,
-  ): Promise<ExtensionInfo> {
+  ): Promise<AgentInfo> {
     if (!file) {
       throw new BadRequestException('No file provided');
     }
-    return this.agentService.saveExtension(file);
+    return this.agentService.saveMacFile(file);
   }
 
   @UseGuards(JwtAuthGuard)
-  @Get('extension/info')
-  async getExtensionInfo(): Promise<ExtensionInfo | null> {
-    return this.agentService.getExtensionInfo();
+  @Get('mac/info')
+  async getMacInfo(): Promise<AgentInfo | null> {
+    return this.agentService.getMacInfo();
   }
 
   @UseGuards(JwtAuthGuard)
-  @Get('extension/download')
-  async downloadExtension(@Res() res: Response): Promise<void> {
-    const filePath = this.agentService.getExtensionFilePath();
-    if (!filePath) {
-      throw new NotFoundException('Browser extension is not available');
+  @Get('mac/download')
+  async downloadMac(@Res() res: Response): Promise<void> {
+    const art = this.agentService.resolveMacArtifact();
+    if (!art) {
+      throw new NotFoundException('Mac tracking agent is not available');
     }
-    const absolutePath = resolve(filePath);
+    const absolutePath = resolve(art.path);
     res.setHeader(
       'Content-Disposition',
-      'attachment; filename="browser-extension.zip"',
+      `attachment; filename="${art.filename}"`,
     );
     res.sendFile(absolutePath);
   }

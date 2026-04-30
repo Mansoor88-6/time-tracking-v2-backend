@@ -8,6 +8,7 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type {
   Request as ExpressRequest,
   Response as ExpressResponse,
@@ -33,7 +34,7 @@ export class AuthController {
   @Public()
   @Get('login')
   getLoginPage(@Req() req: ExpressRequest, @Res() res: ExpressResponse) {
-    const returnUrl = (req.query?.returnUrl as string) || undefined;
+    const returnUrl = this.getSafeReturnUrl(req.query?.returnUrl);
 
     // Device / backend-rendered login page
     // This is primarily used for device authorization flows opened by the desktop agent.
@@ -213,14 +214,14 @@ export class AuthController {
     <div class="device-info">
       This window was opened by the Time Tracking desktop agent. After signing in, you can close this tab.
     </div>
-    <form id="loginForm" method="POST" action="/auth/login${returnUrl ? '?returnUrl=' + encodeURIComponent(returnUrl) : ''}">
+    <form id="loginForm" method="POST" action="/auth/login${returnUrl ? '?returnUrl=' + encodeURIComponent(returnUrl) : ''}" autocomplete="off">
       <div class="form-group">
         <label for="email">Email</label>
         <input type="email" id="email" name="email" autocomplete="email" required>
       </div>
       <div class="form-group">
         <label for="password">Password</label>
-        <input type="password" id="password" name="password" autocomplete="current-password" required>
+        <input type="password" id="password" name="password" autocomplete="off" required>
       </div>
       <!-- Force userType to 'user' for device authorization flows -->
       <input type="hidden" id="userType" name="userType" value="user" />
@@ -277,26 +278,26 @@ export class AuthController {
     `;
 
     res.setHeader('Content-Type', 'text/html');
+    this.setNoStoreHeaders(res);
     res.send(html);
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
   async login(
     @Body() loginDto: LoginDto & { device?: DeviceInfoDto },
     @Req() req: ExpressRequest,
     @Res() res: ExpressResponse,
   ) {
-    const returnUrl = (req.query?.returnUrl as string) || undefined;
+    const returnUrl = this.getSafeReturnUrl(req.query?.returnUrl);
 
     // For device authorization flows (opened by the desktop agent), we always
     // treat the login as a regular user, never as a superadmin, regardless of
     // what the client sends.
-    if (returnUrl && returnUrl.includes('/auth/device/authorize')) {
+    if (returnUrl?.startsWith('/auth/device/authorize')) {
       loginDto.userType = UserType.USER;
     }
-    console.log(loginDto);
-    console.log(returnUrl);
 
     if (loginDto.userType === UserType.SUPERADMIN) {
       const superAdmin = await this.authService.validateSuperAdmin(
@@ -337,7 +338,6 @@ export class AuthController {
         loginDto.email,
         loginDto.password,
       );
-      console.log(user);
       if (!user) {
         throw new UnauthorizedException('Invalid credentials');
       }
@@ -348,8 +348,7 @@ export class AuthController {
         ipAddress: loginDto.device?.ipAddress,
         clientType: loginDto.device?.clientType,
       });
-      console.log(result);
-      
+
       // Set httpOnly cookie for refresh token (more secure)
       const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('refreshToken', result.refreshToken, {
@@ -378,6 +377,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login/superadmin')
   async loginSuperAdmin(@Body() loginDto: LoginDto) {
     const superAdmin = await this.authService.validateSuperAdmin(
@@ -447,10 +447,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Post('logout')
-  async logout(
-    @Req() req: ExpressRequest,
-    @Res() res: ExpressResponse,
-  ) {
+  async logout(@Req() req: ExpressRequest, @Res() res: ExpressResponse) {
     // Extract token from request
     const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
 
@@ -472,5 +469,31 @@ export class AuthController {
     return res.json({
       message: 'Logged out successfully',
     });
+  }
+
+  private setNoStoreHeaders(res: ExpressResponse) {
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+
+  private getSafeReturnUrl(value: unknown): string | undefined {
+    if (typeof value !== 'string' || !value.startsWith('/')) {
+      return undefined;
+    }
+    if (value.startsWith('//')) {
+      return undefined;
+    }
+    try {
+      const parsed = new URL(value, 'http://localhost');
+      return parsed.pathname === '/auth/device/authorize'
+        ? `${parsed.pathname}${parsed.search}`
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 }

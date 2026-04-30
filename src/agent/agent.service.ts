@@ -4,15 +4,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const AGENT_FILENAME = 'tracking-agent.exe';
-const EXTENSION_FILENAME = 'browser-extension.zip';
+const MAC_AGENT_BASE = 'tracking-agent-macos';
+const MAC_EXTENSIONS = ['.dmg', '.zip'] as const;
 
 export interface AgentInfo {
-  filename: string;
-  size: number;
-  uploadedAt: string;
-}
-
-export interface ExtensionInfo {
   filename: string;
   size: number;
   uploadedAt: string;
@@ -23,13 +18,27 @@ export class AgentService {
   private readonly uploadDir: string;
   private readonly maxFileSizeBytes: number;
   private readonly agentPath: string;
-  private readonly extensionPath: string;
 
   constructor(private readonly configService: ConfigService) {
     this.uploadDir = this.configService.get<string>('agent.uploadDir') ?? 'uploads/agent';
     this.maxFileSizeBytes = this.configService.get<number>('agent.maxFileSizeBytes') ?? 104857600;
     this.agentPath = path.join(this.uploadDir, AGENT_FILENAME);
-    this.extensionPath = path.join(this.uploadDir, EXTENSION_FILENAME);
+  }
+
+  /**
+   * Single Mac artifact: either tracking-agent-macos.dmg or .zip (latest upload wins per ext).
+   */
+  resolveMacArtifact(): { path: string; filename: string } | null {
+    for (const ext of MAC_EXTENSIONS) {
+      const p = path.join(this.uploadDir, `${MAC_AGENT_BASE}${ext}`);
+      try {
+        fs.accessSync(p, fs.constants.R_OK);
+        return { path: p, filename: `${MAC_AGENT_BASE}${ext}` };
+      } catch {
+        /* try next */
+      }
+    }
+    return null;
   }
 
   async saveFile(file: Express.Multer.File): Promise<AgentInfo> {
@@ -79,7 +88,7 @@ export class AgentService {
     }
   }
 
-  async saveExtension(file: Express.Multer.File): Promise<ExtensionInfo> {
+  async saveMacFile(file: Express.Multer.File): Promise<AgentInfo> {
     if (!file || !file.buffer) {
       throw new BadRequestException('No file provided');
     }
@@ -89,40 +98,42 @@ export class AgentService {
       );
     }
     const ext = path.extname(file.originalname).toLowerCase();
-    if (ext !== '.zip') {
-      throw new BadRequestException('Only .zip files are allowed');
+    if (ext !== '.zip' && ext !== '.dmg') {
+      throw new BadRequestException(
+        'Only .zip or .dmg files are allowed for the Mac agent',
+      );
     }
 
     fs.mkdirSync(this.uploadDir, { recursive: true });
-    fs.writeFileSync(this.extensionPath, file.buffer);
-
-    const stat = fs.statSync(this.extensionPath);
+    for (const other of MAC_EXTENSIONS) {
+      if (other !== ext) {
+        const p = path.join(this.uploadDir, `${MAC_AGENT_BASE}${other}`);
+        try {
+          fs.unlinkSync(p);
+        } catch {
+          /* no file */
+        }
+      }
+    }
+    const macPath = path.join(this.uploadDir, `${MAC_AGENT_BASE}${ext}`);
+    fs.writeFileSync(macPath, file.buffer);
+    const stat = fs.statSync(macPath);
+    const filename = `${MAC_AGENT_BASE}${ext}`;
     return {
-      filename: EXTENSION_FILENAME,
+      filename,
       size: stat.size,
       uploadedAt: stat.mtime.toISOString(),
     };
   }
 
-  async getExtensionInfo(): Promise<ExtensionInfo | null> {
-    try {
-      const stat = fs.statSync(this.extensionPath);
-      return {
-        filename: EXTENSION_FILENAME,
-        size: stat.size,
-        uploadedAt: stat.mtime.toISOString(),
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  getExtensionFilePath(): string | null {
-    try {
-      fs.accessSync(this.extensionPath, fs.constants.R_OK);
-      return this.extensionPath;
-    } catch {
-      return null;
-    }
+  async getMacInfo(): Promise<AgentInfo | null> {
+    const art = this.resolveMacArtifact();
+    if (!art) return null;
+    const stat = fs.statSync(art.path);
+    return {
+      filename: art.filename,
+      size: stat.size,
+      uploadedAt: stat.mtime.toISOString(),
+    };
   }
 }

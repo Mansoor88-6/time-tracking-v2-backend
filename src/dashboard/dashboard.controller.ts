@@ -9,8 +9,12 @@ import {
 } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { UsersService } from '../users/users.service';
-import { DashboardStatsQueryDto } from './dto/dashboard-stats-query.dto';
+import {
+  DashboardStatsQueryDto,
+  DashboardMonthCalendarQueryDto,
+} from './dto/dashboard-stats-query.dto';
 import { OrganizationStatsQueryDto } from './dto/organization-stats-query.dto';
+import { ColleaguesQueryDto } from './dto/colleagues-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../auth/guards/tenant.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -227,6 +231,62 @@ export class DashboardController {
       );
       throw error;
     }
+  }
+
+  @Get('month-calendar')
+  async getMonthCalendar(
+    @Query() query: DashboardMonthCalendarQueryDto,
+    @Request() req: any,
+  ) {
+    let tenantId = req.user.tenantId as number | undefined;
+    let userId = req.user.id as number;
+
+    if (query.userId !== undefined && query.userId !== null) {
+      const role = req.user.role;
+      if (role !== Roles.ORG_ADMIN && role !== Roles.SUPER_ADMIN) {
+        throw new ForbiddenException(
+          'Only org admins can view another user\'s month overview',
+        );
+      }
+      const targetUser = await this.usersService.findOne(
+        query.userId,
+        role === Roles.ORG_ADMIN ? req.user.tenantId : undefined,
+      );
+      tenantId = targetUser.tenantId;
+      userId = targetUser.id;
+    }
+
+    if (tenantId === undefined) {
+      throw new ForbiddenException(
+        'Tenant context required. Use userId query to view a specific user.',
+      );
+    }
+
+    return this.dashboardService.getMonthCalendarStats(
+      tenantId,
+      userId,
+      query.startDate,
+      query.endDate,
+      query.tz,
+    );
+  }
+
+  @Get('colleagues')
+  async getColleagues(
+    @Query() query: ColleaguesQueryDto,
+    @Request() req: any,
+  ) {
+    const tenantId = req.user?.tenantId as number | undefined;
+    if (tenantId === undefined || tenantId === null) {
+      throw new ForbiddenException(
+        'Tenant context required for colleagues',
+      );
+    }
+    return this.dashboardService.getColleagues(
+      tenantId,
+      req.user.id as number,
+      query.windowSec,
+    );
   }
 
   @Get('organization/stats')

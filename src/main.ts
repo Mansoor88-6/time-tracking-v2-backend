@@ -6,6 +6,7 @@ import type { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
 
   const configService = app.get(ConfigService);
 
@@ -23,6 +24,30 @@ async function bootstrap() {
     );
   }
 
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader(
+      'Permissions-Policy',
+      'camera=(), microphone=(), geolocation=()',
+    );
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "img-src 'self' data:",
+        "style-src 'self' 'unsafe-inline'",
+        "script-src 'self' 'unsafe-inline'",
+        "connect-src 'self'",
+      ].join('; '),
+    );
+    next();
+  });
+
   // Enable CORS
   // When credentials: true, origin cannot be '*', must be specific origin(s)
   const frontendUrl = process.env.FRONTEND_URL;
@@ -37,7 +62,10 @@ async function bootstrap() {
         'http://192.168.18.18:4000',
       ];
   const fromExtra = corsExtra
-    ? corsExtra.split(',').map((u) => u.trim()).filter(Boolean)
+    ? corsExtra
+        .split(',')
+        .map((u) => u.trim())
+        .filter(Boolean)
     : [];
   const allowedOrigins = [...new Set([...fromFrontend, ...fromExtra])];
   console.log(
