@@ -155,12 +155,15 @@ export class UsersService {
   ): Promise<void> {
     await manager.getRepository(TeamMember).delete({ userId });
 
+    // Clear manager FK on every team referencing this user. Scoped only by
+    // managerId (not team.tenantId): legacy or inconsistent data can assign a
+    // user as manager of a team in another tenant; a tenant-scoped update would
+    // miss those rows and block DELETE on "user" (FK_82b816660e91be06f88e130a99b).
     await manager
       .createQueryBuilder()
       .update(Team)
       .set({ managerId: null })
       .where('managerId = :userId', { userId })
-      .andWhere('tenantId = :tenantId', { tenantId })
       .execute();
 
     await manager.getRepository(UserSession).delete({ userId });
