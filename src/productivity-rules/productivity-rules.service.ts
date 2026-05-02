@@ -256,6 +256,26 @@ export class ProductivityRulesService {
     return { rules, unclassified };
   }
 
+  async archiveUnclassified(
+    tenantId: number,
+    unclassifiedId: number,
+  ): Promise<UnclassifiedApp> {
+    const unclassified = await this.unclassifiedRepository.findOne({
+      where: {
+        id: unclassifiedId,
+        tenantId,
+      },
+      relations: ['team'],
+    });
+
+    if (!unclassified) {
+      throw new NotFoundException('Unclassified app not found');
+    }
+
+    unclassified.status = UnclassifiedAppStatus.ARCHIVED;
+    return this.unclassifiedRepository.save(unclassified);
+  }
+
   // Helper method for worker service to get rules for user's teams
   // Now queries via collections: gets all collections assigned to user's teams, then gets all rules from those collections
   async getUserTeamRules(

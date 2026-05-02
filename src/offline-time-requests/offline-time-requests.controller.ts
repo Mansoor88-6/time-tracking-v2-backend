@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -45,8 +46,21 @@ export class OfflineTimeRequestsController {
   @Get('pending')
   @RolesDecorator(Roles.ORG_ADMIN, Roles.SUPER_ADMIN)
   @UseGuards(RolesGuard)
-  async listPending(@Request() req: { user: { tenantId: number } }) {
-    return this.service.listPendingForTenant(req.user.tenantId);
+  async listPending(
+    @Request() req: { user: { tenantId: number } },
+    @Query('userId') userId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const parsedUserId = userId ? parseInt(userId, 10) : undefined;
+    if (userId && Number.isNaN(parsedUserId)) {
+      throw new BadRequestException('Invalid userId');
+    }
+    return this.service.listPendingForTenant(req.user.tenantId, {
+      userId: parsedUserId,
+      startDate,
+      endDate,
+    });
   }
 
   @Post(':id/approve')

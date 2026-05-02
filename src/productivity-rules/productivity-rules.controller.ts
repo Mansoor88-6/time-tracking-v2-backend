@@ -121,4 +121,14 @@ export class ProductivityRulesController {
       dto,
     );
   }
+
+  @Patch('unclassified/:id/archive')
+  @RolesDecorator(Roles.ORG_ADMIN)
+  @UseGuards(RolesGuard)
+  archiveUnclassified(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.productivityRulesService.archiveUnclassified(
+      req.user.tenantId,
+      id,
+    );
+  }
 }

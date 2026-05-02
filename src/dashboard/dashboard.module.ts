@@ -5,6 +5,7 @@ import { DashboardService } from './dashboard.service';
 import { TenantsModule } from '../tenants/tenants.module';
 import { UsersModule } from '../users/users.module';
 import { TeamsModule } from '../teams/teams.module';
+import { OfflineTimeRequestsModule } from '../offline-time-requests/offline-time-requests.module';
 
 /**
  * Dashboard Module
@@ -12,7 +13,13 @@ import { TeamsModule } from '../teams/teams.module';
  * Provides dashboard statistics endpoints that proxy requests to the worker service.
  */
 @Module({
-  imports: [ConfigModule, TenantsModule, UsersModule, TeamsModule],
+  imports: [
+    ConfigModule,
+    TenantsModule,
+    UsersModule,
+    TeamsModule,
+    OfflineTimeRequestsModule,
+  ],
   controllers: [DashboardController],
   providers: [DashboardService],
   exports: [DashboardService],

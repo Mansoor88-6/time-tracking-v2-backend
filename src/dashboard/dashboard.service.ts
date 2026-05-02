@@ -573,6 +573,68 @@ export class DashboardService {
     }
   }
 
+  async deleteTrackedTime(
+    tenantId: number,
+    userId: number,
+    startAt: string,
+    endAt: string,
+  ): Promise<{
+    ok: boolean;
+    deletedEvents: number;
+    trimmedEvents: number;
+    splitEvents: number;
+  }> {
+    const start = new Date(startAt);
+    const end = new Date(endAt);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      throw new HttpException('Invalid date range', HttpStatus.BAD_REQUEST);
+    }
+    if (end <= start) {
+      throw new HttpException('endAt must be after startAt', HttpStatus.BAD_REQUEST);
+    }
+
+    const url = `${this.workerServiceUrl}/internal/stats/delete-tracked-time`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.requestTimeoutMs,
+    );
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'X-Worker-Key': this.workerInternalKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tenantId,
+          userId,
+          startMs: start.getTime(),
+          endMs: end.getTime(),
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new HttpException(
+          text || 'Worker could not delete tracked time',
+          response.status || HttpStatus.BAD_GATEWAY,
+        );
+      }
+
+      return response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new ServiceUnavailableException('Worker request timed out');
+      }
+      throw error;
+    }
+  }
+
   /**
    * Get organization dashboard stats aggregated across multiple users
    *

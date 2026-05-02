@@ -110,11 +110,69 @@ export class OfflineTimeRequestsService {
     return q.getMany();
   }
 
-  async listPendingForTenant(tenantId: number): Promise<OfflineTimeRequest[]> {
-    return this.repo.find({
-      where: { tenantId, status: OfflineTimeRequestStatus.PENDING },
-      order: { createdAt: 'ASC' },
-    });
+  async listPendingForTenant(
+    tenantId: number,
+    filters?: {
+      userId?: number;
+      startDate?: string;
+      endDate?: string;
+    },
+  ): Promise<OfflineTimeRequest[]> {
+    const q = this.repo
+      .createQueryBuilder('r')
+      .where('r.tenantId = :tenantId', { tenantId })
+      .andWhere('r.status = :status', {
+        status: OfflineTimeRequestStatus.PENDING,
+      })
+      .orderBy('r.createdAt', 'ASC');
+
+    if (filters?.userId) {
+      q.andWhere('r.userId = :userId', { userId: filters.userId });
+    }
+
+    if (filters?.startDate) {
+      const start = new Date(filters.startDate);
+      if (Number.isNaN(start.getTime())) {
+        throw new BadRequestException('Invalid startDate');
+      }
+      q.andWhere('r.endAt >= :startDate', { startDate: start });
+    }
+
+    if (filters?.endDate) {
+      const end = new Date(filters.endDate);
+      if (Number.isNaN(end.getTime())) {
+        throw new BadRequestException('Invalid endDate');
+      }
+      q.andWhere('r.startAt <= :endDate', { endDate: end });
+    }
+
+    return q.getMany();
+  }
+
+  async deletePendingForUserRange(
+    tenantId: number,
+    userId: number,
+    startAt: Date,
+    endAt: Date,
+  ): Promise<number> {
+    if (endAt <= startAt) {
+      throw new BadRequestException('endAt must be after startAt');
+    }
+
+    const requests = await this.repo
+      .createQueryBuilder('r')
+      .where('r.tenantId = :tenantId', { tenantId })
+      .andWhere('r.userId = :userId', { userId })
+      .andWhere('r.status = :status', {
+        status: OfflineTimeRequestStatus.PENDING,
+      })
+      .andWhere('r.startAt < :endAt', { endAt })
+      .andWhere('r.endAt > :startAt', { startAt })
+      .getMany();
+
+    if (requests.length === 0) return 0;
+    await this.repo.remove(requests);
+    return requests.length;
   }
 
   async findOneForTenant(

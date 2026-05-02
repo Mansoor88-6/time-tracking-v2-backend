@@ -1,14 +1,18 @@
 import {
+  Body,
   Controller,
   Get,
+  Post,
   Query,
   UseGuards,
   Request,
   Logger,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { UsersService } from '../users/users.service';
+import { OfflineTimeRequestsService } from '../offline-time-requests/offline-time-requests.service';
 import {
   DashboardStatsQueryDto,
   DashboardMonthCalendarQueryDto,
@@ -36,6 +40,7 @@ export class DashboardController {
   constructor(
     private readonly dashboardService: DashboardService,
     private readonly usersService: UsersService,
+    private readonly offlineTimeRequestsService: OfflineTimeRequestsService,
   ) {}
 
   @Get('stats')
@@ -231,6 +236,43 @@ export class DashboardController {
       );
       throw error;
     }
+  }
+
+  @Post('tracked-time/delete')
+  async deleteTrackedTime(
+    @Body()
+    body: {
+      startAt?: string;
+      endAt?: string;
+    },
+    @Request() req: any,
+  ) {
+    const tenantId = req.user.tenantId as number | undefined;
+    const userId = req.user.id as number;
+    if (tenantId === undefined) {
+      throw new ForbiddenException('Tenant context required.');
+    }
+
+    const start = body.startAt ? new Date(body.startAt) : null;
+    const end = body.endAt ? new Date(body.endAt) : null;
+    if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      throw new BadRequestException('Valid startAt and endAt are required');
+    }
+
+    const result = await this.dashboardService.deleteTrackedTime(
+      tenantId,
+      userId,
+      start.toISOString(),
+      end.toISOString(),
+    );
+    const deletedOfflineRequests =
+      await this.offlineTimeRequestsService.deletePendingForUserRange(
+        tenantId,
+        userId,
+        start,
+        end,
+      );
+    return { ...result, deletedOfflineRequests };
   }
 
   @Get('month-calendar')
