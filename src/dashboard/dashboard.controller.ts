@@ -18,6 +18,7 @@ import {
   DashboardMonthCalendarQueryDto,
 } from './dto/dashboard-stats-query.dto';
 import { OrganizationStatsQueryDto } from './dto/organization-stats-query.dto';
+import { WageSummaryQueryDto } from './dto/wage-summary-query.dto';
 import { ColleaguesQueryDto } from './dto/colleagues-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../auth/guards/tenant.guard';
@@ -106,6 +107,47 @@ export class DashboardController {
       );
       throw error;
     }
+  }
+
+  /**
+   * Estimated accumulated wage for the signed-in user over a calendar range (typically one month),
+   * based on productive time and compensation settings managed by an org admin.
+   */
+  @Get('wage-summary')
+  async getWageSummary(
+    @Query() query: WageSummaryQueryDto,
+    @Request() req: any,
+  ) {
+    let tenantId = req.user.tenantId as number | undefined;
+    let userId = req.user.id as number;
+
+    if (query.userId !== undefined && query.userId !== null) {
+      const role = req.user.role;
+      if (role !== Roles.ORG_ADMIN && role !== Roles.SUPER_ADMIN) {
+        throw new ForbiddenException(
+          'Only organization admins can view another user\'s wage summary.',
+        );
+      }
+      const targetUser = await this.usersService.findOne(
+        query.userId,
+        role === Roles.ORG_ADMIN ? req.user.tenantId : undefined,
+      );
+      tenantId = targetUser.tenantId;
+      userId = targetUser.id;
+    }
+
+    if (tenantId === undefined || tenantId === null) {
+      throw new ForbiddenException(
+        'Tenant context required for wage summary.',
+      );
+    }
+    return this.dashboardService.getWageSummary(
+      tenantId,
+      userId,
+      query.startDate,
+      query.endDate,
+      query.tz,
+    );
   }
 
   @Get('app-usage')

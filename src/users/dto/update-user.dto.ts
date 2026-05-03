@@ -5,8 +5,13 @@ import {
   IsOptional,
   IsEnum,
   IsBoolean,
+  IsNumber,
+  Min,
+  Max,
+  ValidateIf,
 } from 'class-validator';
-import { Roles } from '../../common/enums/roles.enum';
+import { Type } from 'class-transformer';
+import { WageCurrency } from '../../common/enums/wage-currency.enum';
 
 export class UpdateUserDto {
   @IsOptional()
@@ -25,4 +30,24 @@ export class UpdateUserDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.5)
+  @Max(24)
+  dailyWorkingHours?: number | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  monthlyWage?: number | null;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsEnum(WageCurrency)
+  wageCurrency?: WageCurrency | null;
 }

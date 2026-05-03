@@ -2,6 +2,7 @@ import { Entity, Column, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Roles } from '../../common/enums/roles.enum';
+import { WageCurrency } from '../../common/enums/wage-currency.enum';
 
 @Entity()
 @Index(['tenantId'])
@@ -48,4 +49,32 @@ export class User extends BaseEntity {
 
   @Column({ default: true })
   isActive: boolean;
+
+  /**
+   * Expected productive hours per working day (e.g. 7 or 8). Used with monthly wage for earnings estimates.
+   */
+  @Column({
+    type: 'double precision',
+    name: 'daily_working_hours',
+    nullable: true,
+  })
+  dailyWorkingHours?: number | null;
+
+  /**
+   * Gross monthly salary for wage estimates (same currency as wageCurrency).
+   */
+  @Column({
+    type: 'double precision',
+    name: 'monthly_wage',
+    nullable: true,
+  })
+  monthlyWage?: number | null;
+
+  @Column({
+    type: 'enum',
+    enum: WageCurrency,
+    name: 'wage_currency',
+    nullable: true,
+  })
+  wageCurrency?: WageCurrency | null;
 }

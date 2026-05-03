@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
@@ -23,6 +24,7 @@ import { TenantContextService } from '../tenants/services/tenant-context.service
 import { TeamsService } from '../teams/teams.service';
 import { hashPassword } from '../common/utils/password.util';
 import { Roles } from '../common/enums/roles.enum';
+import { WageCurrency } from '../common/enums/wage-currency.enum';
 
 export interface UserListEntry {
   id: number;
@@ -38,6 +40,9 @@ export interface UserListEntry {
   createdAt: Date;
   updatedAt: Date;
   teams: { id: number; name: string }[];
+  dailyWorkingHours?: number | null;
+  monthlyWage?: number | null;
+  wageCurrency?: WageCurrency | null;
 }
 
 @Injectable()
@@ -60,6 +65,11 @@ export class UsersService {
         'A user with this email already exists in your organization.',
       );
     }
+    this.validateCompensationTriplet(
+      createUserDto.dailyWorkingHours,
+      createUserDto.monthlyWage,
+      createUserDto.wageCurrency,
+    );
     const hashedPassword = await hashPassword(createUserDto.password);
     const user = this.userRepository.create({
       ...createUserDto,
@@ -125,12 +135,79 @@ export class UsersService {
   ): Promise<User> {
     const user = await this.findOne(id, tenantId);
 
+    const wagePatch = {
+      d:
+        updateUserDto.dailyWorkingHours !== undefined
+          ? updateUserDto.dailyWorkingHours
+          : user.dailyWorkingHours,
+      m:
+        updateUserDto.monthlyWage !== undefined
+          ? updateUserDto.monthlyWage
+          : user.monthlyWage,
+      w:
+        updateUserDto.wageCurrency !== undefined
+          ? updateUserDto.wageCurrency
+          : user.wageCurrency,
+    };
+
+    if (
+      updateUserDto.dailyWorkingHours !== undefined ||
+      updateUserDto.monthlyWage !== undefined ||
+      updateUserDto.wageCurrency !== undefined
+    ) {
+      const allNull = wagePatch.d == null && wagePatch.m == null && wagePatch.w == null;
+      if (allNull) {
+        user.dailyWorkingHours = null;
+        user.monthlyWage = null;
+        user.wageCurrency = null;
+      } else {
+        this.validateCompensationTriplet(
+          wagePatch.d ?? undefined,
+          wagePatch.m ?? undefined,
+          wagePatch.w ?? undefined,
+        );
+        user.dailyWorkingHours = wagePatch.d as number;
+        user.monthlyWage = wagePatch.m as number;
+        user.wageCurrency = wagePatch.w as WageCurrency;
+      }
+    }
+
     if (updateUserDto.password) {
       updateUserDto.password = await hashPassword(updateUserDto.password);
     }
 
-    Object.assign(user, updateUserDto);
+    const {
+      dailyWorkingHours: _d,
+      monthlyWage: _m,
+      wageCurrency: _w,
+      ...rest
+    } = updateUserDto;
+    Object.assign(user, rest);
     return this.userRepository.save(user);
+  }
+
+  /**
+   * Compensation must be all unset or all set with positive hours and wage.
+   */
+  private validateCompensationTriplet(
+    daily?: number | null,
+    monthly?: number | null,
+    currency?: WageCurrency | null,
+  ): void {
+    const any =
+      daily != null || monthly != null || currency != null;
+    if (!any) return;
+    if (
+      daily == null ||
+      monthly == null ||
+      currency == null ||
+      daily <= 0 ||
+      monthly <= 0
+    ) {
+      throw new BadRequestException(
+        'Compensation requires daily working hours, monthly wage, and currency together (daily hours > 0, wage > 0). Remove all wage fields to clear.',
+      );
+    }
   }
 
   async remove(id: number, tenantId: number): Promise<void> {

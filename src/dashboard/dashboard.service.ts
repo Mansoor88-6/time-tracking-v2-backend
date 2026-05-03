@@ -4,11 +4,13 @@ import {
   HttpException,
   HttpStatus,
   ServiceUnavailableException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
 import { TeamsService } from '../teams/teams.service';
 import { Roles } from '../common/enums/roles.enum';
+import { countWeekdaysInclusive, computeWageSnapshot } from './wage.util';
 
 /**
  * Dashboard Service
@@ -65,14 +67,17 @@ export class DashboardService {
     timezone?: string,
     startDate?: string,
     endDate?: string,
+    options?: { requestTimeoutMs?: number },
   ): Promise<any> {
     const startTime = Date.now();
 
     // Default to today's date if not provided (only if no date range)
     const targetDate = date || (startDate && endDate ? undefined : this.getTodayDateString());
+    const workerTimeoutMs =
+      options?.requestTimeoutMs ?? this.requestTimeoutMs;
 
     this.logger.log(
-      `📊 Dashboard stats request: tenant=${tenantId}, user=${userId}, date=${targetDate || 'N/A'}, startDate=${startDate || 'N/A'}, endDate=${endDate || 'N/A'}, tz=${timezone || 'UTC'}`,
+      `📊 Dashboard stats request: tenant=${tenantId}, user=${userId}, date=${targetDate || 'N/A'}, startDate=${startDate || 'N/A'}, endDate=${endDate || 'N/A'}, tz=${timezone || 'UTC'}, timeoutMs=${workerTimeoutMs}`,
     );
 
     try {
@@ -101,11 +106,8 @@ export class DashboardService {
       const controller = new AbortController();
       const timeoutId = setTimeout(
         () => controller.abort(),
-        this.requestTimeoutMs,
+        workerTimeoutMs,
       );
-
-      console.log('url', url);
-      console.log('workerInternalKey', this.workerInternalKey);
 
       try {
         // Make request to worker service
@@ -146,7 +148,6 @@ export class DashboardService {
         }
 
         const data = await response.json();
-        console.log('response from worker for dashboard stats', data);
         this.logger.log(
           `✅ Dashboard stats retrieved in ${duration}ms for tenant ${tenantId}, user ${userId}`,
         );
@@ -159,7 +160,7 @@ export class DashboardService {
 
         if (fetchError.name === 'AbortError') {
           this.logger.error(
-            `❌ Worker service request timed out after ${this.requestTimeoutMs}ms`,
+            `❌ Worker service request timed out after ${workerTimeoutMs}ms`,
           );
           throw new ServiceUnavailableException(
             'Worker service request timed out',
@@ -701,10 +702,15 @@ export class DashboardService {
         };
       }
 
-      // Get stats for each user
-      const userStatsPromises = allUsers.map(async (user) => {
+      const useDateRange = !!(query.startDate && query.endDate);
+      /** Range queries load more events; avoid hammering the worker and allow longer per-user timeouts. */
+      const perUserWorkerTimeoutMs = useDateRange
+        ? Math.max(this.requestTimeoutMs, 60_000)
+        : this.requestTimeoutMs;
+      const orgUserBatchSize = useDateRange ? 6 : 12;
+
+      const fetchOneUser = async (user: (typeof allUsers)[0]) => {
         try {
-          // Use date range if provided, otherwise use single date
           const stats = await this.getDashboardStats(
             tenantId,
             user.id,
@@ -712,6 +718,7 @@ export class DashboardService {
             query.tz,
             query.startDate,
             query.endDate,
+            { requestTimeoutMs: perUserWorkerTimeoutMs },
           );
 
           return {
@@ -724,7 +731,6 @@ export class DashboardService {
           this.logger.warn(
             `Failed to get stats for user ${user.id}: ${error instanceof Error ? error.message : String(error)}`,
           );
-          // Return zero stats for failed users
           return {
             userId: user.id,
             userName: user.name,
@@ -742,9 +748,21 @@ export class DashboardService {
             },
           };
         }
-      });
+      };
 
-      const userStats = await Promise.all(userStatsPromises);
+      const userStats: Awaited<ReturnType<typeof fetchOneUser>>[] = [];
+      for (let i = 0; i < allUsers.length; i += orgUserBatchSize) {
+        const slice = allUsers.slice(i, i + orgUserBatchSize);
+        const batch = await Promise.all(slice.map((u) => fetchOneUser(u)));
+        userStats.push(...batch);
+      }
+
+      const usersWithTrackedTime = userStats.filter(
+        (u) =>
+          (u.stats.deskTimeMs || 0) > 0 ||
+          (u.stats.productiveTimeMs || 0) > 0 ||
+          (u.stats.timeAtWorkMs || 0) > 0,
+      );
 
       // Aggregate stats
       const aggregated = {
@@ -765,21 +783,22 @@ export class DashboardService {
           0,
         ),
         averageProductivityScore:
-          userStats.length > 0
-            ? userStats.reduce(
+          usersWithTrackedTime.length > 0
+            ? usersWithTrackedTime.reduce(
                 (sum, u) => sum + (u.stats.productivityScorePct || 0),
                 0,
-              ) / userStats.length
+              ) / usersWithTrackedTime.length
             : 0,
         averageEffectiveness:
-          userStats.length > 0
-            ? userStats.reduce(
+          usersWithTrackedTime.length > 0
+            ? usersWithTrackedTime.reduce(
                 (sum, u) => sum + (u.stats.effectivenessPct || 0),
                 0,
-              ) / userStats.length
+              ) / usersWithTrackedTime.length
             : 0,
         totalUsers: userStats.length,
-        activeUsers: userStats.filter((u) => u.stats.isOnline).length,
+        /** Users with any tracked time in the selected period (not real-time "online"). */
+        activeUsers: usersWithTrackedTime.length,
       };
 
       const duration = Date.now() - startTime;
@@ -922,6 +941,88 @@ export class DashboardService {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  /**
+   * Employee wage estimate for a calendar period: productive hours × implied hourly rate,
+   * where rate = monthlyWage / (dailyWorkingHours × weekdays in period).
+   */
+  async getWageSummary(
+    tenantId: number,
+    userId: number,
+    startDate: string,
+    endDate: string,
+    tz?: string,
+  ): Promise<
+    | { configured: false }
+    | {
+        configured: true;
+        currency: string;
+        dailyWorkingHours: number;
+        monthlyWage: number;
+        startDate: string;
+        endDate: string;
+        workdaysInPeriod: number;
+        productiveTimeMs: number;
+        productiveHours: number;
+        hourlyRate: number;
+        accumulatedWage: number;
+        progressTowardMonthlyPct: number;
+      }
+  > {
+    if (startDate > endDate) {
+      throw new BadRequestException(
+        'startDate must be on or before endDate',
+      );
+    }
+    const s = new Date(`${startDate}T12:00:00`);
+    const e = new Date(`${endDate}T12:00:00`);
+    const spanDays =
+      Math.floor((e.getTime() - s.getTime()) / 86_400_000) + 1;
+    if (spanDays > 62) {
+      throw new BadRequestException('Date range cannot exceed 62 days');
+    }
+
+    const user = await this.usersService.findOne(userId, tenantId);
+    if (
+      user.monthlyWage == null ||
+      user.dailyWorkingHours == null ||
+      user.wageCurrency == null ||
+      user.monthlyWage <= 0 ||
+      user.dailyWorkingHours <= 0
+    ) {
+      return { configured: false };
+    }
+
+    const stats = await this.getDashboardStats(
+      tenantId,
+      userId,
+      undefined,
+      tz,
+      startDate,
+      endDate,
+      { requestTimeoutMs: Math.max(this.requestTimeoutMs, 60_000) },
+    );
+
+    const workdaysInPeriod = countWeekdaysInclusive(startDate, endDate);
+    const snap = computeWageSnapshot({
+      productiveTimeMs: stats.productiveTimeMs ?? 0,
+      dailyWorkingHours: user.dailyWorkingHours,
+      monthlyWage: user.monthlyWage,
+      workdaysInPeriod,
+    });
+
+    return {
+      configured: true,
+      currency: user.wageCurrency,
+      dailyWorkingHours: user.dailyWorkingHours,
+      monthlyWage: user.monthlyWage,
+      startDate,
+      endDate,
+      workdaysInPeriod,
+      productiveTimeMs: stats.productiveTimeMs ?? 0,
+      ...snap,
+    };
   }
 
   private getTodayDateString(): string {
